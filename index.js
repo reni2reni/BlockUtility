@@ -235,36 +235,30 @@
         return rules.length;
     }
 
-    // NAME / SUBROUTINE_NAME を持つすべてのブロックを対象とする簡易検索。
-    const sameNameCycle = new Map();
+    // すべてのブロックを対象とする簡易検索。
+    // 「同種」は block.type が同じことを意味する。
+    const sameTypeCycle = new Map();
 
-    function getGenericBlockName(block) {
-        if (!block) return null;
-        for (const fieldName of ["NAME", "SUBROUTINE_NAME"]) {
-            try {
-                const field = typeof block.getField === "function" ? block.getField(fieldName) : null;
-                const value = field && typeof field.getValue === "function" ? field.getValue() : null;
-                if (value != null && String(value).trim() !== "") return String(value);
-            } catch (_) {}
-        }
-        return null;
+    function getGenericBlockType(block) {
+        if (!block || block.type == null) return null;
+        return String(block.type);
     }
 
-    function goToSameNameBlock(block) {
+    function goToSameTypeBlock(block) {
         if (!block) return false;
-        const name = getGenericBlockName(block);
-        if (!name) return false;
+        const typeName = getGenericBlockType(block);
+        if (!typeName) return false;
 
         const ws = block.workspace || (_Blockly.getMainWorkspace && _Blockly.getMainWorkspace());
         if (!ws || typeof ws.getAllBlocks !== "function") return false;
 
         const targets = getBlocksInVisualOrder(ws.getAllBlocks(false).filter(candidate =>
-            candidate && candidate !== block && getGenericBlockName(candidate) === name
+            candidate && candidate !== block && getGenericBlockType(candidate) === typeName
         ));
         if (!targets.length) return false;
 
-        const key = String(block.id || "") + "::" + name;
-        const previousId = sameNameCycle.get(key);
+        const key = String(block.id || "") + "::" + typeName;
+        const previousId = sameTypeCycle.get(key);
         let index = previousId
             ? targets.findIndex(target => String(target.id) === String(previousId)) + 1
             : 0;
@@ -272,12 +266,12 @@
 
         const target = targets[index];
         if (!selectAndCenter(target)) return false;
-        sameNameCycle.set(key, target.id);
+        sameTypeCycle.set(key, target.id);
         return true;
     }
 
-    function sameNameText() {
-        return getPortalLanguage() === "ja" ? "同名ブロック移動" : "Go to Same-Name Block";
+    function sameTypeText() {
+        return getPortalLanguage() === "ja" ? "同種ブロック移動" : "Go to Same-Type Block";
     }
 
     function subroutineText(direction) {
@@ -295,27 +289,27 @@
         if (menusRegistered) return;
         const Scope = _Blockly.ContextMenuRegistry.ScopeType;
 
-        const sameNameItem = {
-            id: "blockUtilityGoToSameName",
-            displayText: () => sameNameText(),
+        const sameTypeItem = {
+            id: "blockUtilityGoToSameType",
+            displayText: () => sameTypeText(),
             scopeType: Scope.BLOCK,
             weight: 90,
             preconditionFn: scope => {
                 const block = scope && scope.block;
-                if (!block || !getGenericBlockName(block)) return "hidden";
+                const typeName = getGenericBlockType(block);
+                if (!typeName) return "hidden";
                 const ws = block.workspace || (_Blockly.getMainWorkspace && _Blockly.getMainWorkspace());
                 if (!ws || typeof ws.getAllBlocks !== "function") return "hidden";
-                const name = getGenericBlockName(block);
                 return ws.getAllBlocks(false).some(candidate =>
-                    candidate && candidate !== block && getGenericBlockName(candidate) === name
+                    candidate && candidate !== block && getGenericBlockType(candidate) === typeName
                 ) ? "enabled" : "hidden";
             },
             callback: scope => {
-                if (scope && scope.block) goToSameNameBlock(scope.block);
+                if (scope && scope.block) goToSameTypeBlock(scope.block);
             }
         };
-        plugin.registerItem(sameNameItem);
-        _Blockly.ContextMenuRegistry.registry.register(sameNameItem);
+        plugin.registerItem(sameTypeItem);
+        _Blockly.ContextMenuRegistry.registry.register(sameTypeItem);
 
         const subroutineItem = {
             id: "blockUtilityGoToSubroutine",
