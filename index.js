@@ -694,6 +694,13 @@
             clientX: Number(lastCursorClientPoint.x) || 0,
             clientY: Number(lastCursorClientPoint.y) || 0
         });
+        // 独立ブロックを複数貼り付ける場合は、以前と同じように
+        // 全体をまとめてカーソル位置の少し右下へずらす。
+        // 元々連結していたブロックを含む貼り付けでは、連結関係を
+        // 崩さないためオフセットを追加しない。
+        const independentPasteOffset = (isMulti && connections.length === 0)
+            ? { x: 24, y: 24 }
+            : { x: 0, y: 0 };
         const positions = validBlocks.map((d, i) => {
             const p = d?._bf6Position;
             return {
@@ -709,7 +716,10 @@
                 const b = createBlockInstance(ws, validBlocks[i]);
                 if (!b) continue;
                 const C = _Blockly.utils?.Coordinate || function(x,y){this.x=x;this.y=y;};
-                b.moveTo?.(new C(base.x + positions[i].x - minX, base.y + positions[i].y - minY));
+                b.moveTo?.(new C(
+                    base.x + positions[i].x - minX + independentPasteOffset.x,
+                    base.y + positions[i].y - minY + independentPasteOffset.y
+                ));
                 b.render?.();
                 created.push(b);
             }
