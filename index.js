@@ -405,6 +405,13 @@
     function extractBlockForClipboard(block) {
         try {
             const full = _Blockly.serialization.blocks.save(block);
+            // Blocklyのシリアライズだけに任せず、コピー時の実座標も保存する。
+            // これにより、連結スタックは元の上下位置を保ったままペーストできる。
+            try {
+                const pos = typeof block.getRelativeToSurfaceXY === "function"
+                    ? block.getRelativeToSurfaceXY() : null;
+                if (pos) full._bf6Position = { x: Number(pos.x) || 0, y: Number(pos.y) || 0 };
+            } catch (_) {}
             // スタック接続(next)は個別に選択したブロック同士の関係として
             // 別途保存するので、ここでは切り離しておく。
             if (full && full.next) delete full.next;
@@ -687,7 +694,13 @@
             clientX: Number(lastCursorClientPoint.x) || 0,
             clientY: Number(lastCursorClientPoint.y) || 0
         });
-        const positions = validBlocks.map((d, i) => ({ x: Number.isFinite(Number(d?.x)) ? Number(d.x) : i * 40, y: Number.isFinite(Number(d?.y)) ? Number(d.y) : i * 40 }));
+        const positions = validBlocks.map((d, i) => {
+            const p = d?._bf6Position;
+            return {
+                x: Number.isFinite(Number(p?.x)) ? Number(p.x) : (Number.isFinite(Number(d?.x)) ? Number(d.x) : i * 40),
+                y: Number.isFinite(Number(p?.y)) ? Number(p.y) : (Number.isFinite(Number(d?.y)) ? Number(d.y) : i * 40)
+            };
+        });
         const minX = Math.min(...positions.map(p => p.x)), minY = Math.min(...positions.map(p => p.y));
         const created = [];
         try {
@@ -718,9 +731,15 @@
                     try {
                         const a = from.nextConnection;
                         const b = to.previousConnection;
+                        // 「真下に並んでいる」場合だけ接続する。
+                        // 斜めにずれているブロックは、元々連結していたとしても接続しない。
+                        const fp = from.getRelativeToSurfaceXY?.();
+                        const tp = to.getRelativeToSurfaceXY?.();
+                        const xAligned = fp && tp ? Math.abs(Number(fp.x) - Number(tp.x)) <= 8 : false;
+                        const yBelow = fp && tp ? Number(tp.y) > Number(fp.y) : false;
                         const dist = Math.hypot((a.x || 0) - (b.x || 0), (a.y || 0) - (b.y || 0));
-                        // きっちり上下に並んでいる場合だけ接続。
-                        if (dist <= 36 && !a.isConnected?.() && !b.isConnected?.()) {
+                        const closeEnough = dist <= 48;
+                        if (xAligned && yBelow && closeEnough && !a.isConnected?.() && !b.isConnected?.()) {
                             a.connect(b);
                         }
                     } catch (_) {}
