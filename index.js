@@ -235,45 +235,6 @@
         return rules.length;
     }
 
-    // すべてのブロックを対象とする簡易検索。
-    // 「同種」は block.type が同じことを意味する。
-    const sameTypeCycle = new Map();
-
-    function getGenericBlockType(block) {
-        if (!block || block.type == null) return null;
-        return String(block.type);
-    }
-
-    function goToSameTypeBlock(block) {
-        if (!block) return false;
-        const typeName = getGenericBlockType(block);
-        if (!typeName) return false;
-
-        const ws = block.workspace || (_Blockly.getMainWorkspace && _Blockly.getMainWorkspace());
-        if (!ws || typeof ws.getAllBlocks !== "function") return false;
-
-        const targets = getBlocksInVisualOrder(ws.getAllBlocks(false).filter(candidate =>
-            candidate && candidate !== block && getGenericBlockType(candidate) === typeName
-        ));
-        if (!targets.length) return false;
-
-        const key = String(block.id || "") + "::" + typeName;
-        const previousId = sameTypeCycle.get(key);
-        let index = previousId
-            ? targets.findIndex(target => String(target.id) === String(previousId)) + 1
-            : 0;
-        if (index >= targets.length) index = 0;
-
-        const target = targets[index];
-        if (!selectAndCenter(target)) return false;
-        sameTypeCycle.set(key, target.id);
-        return true;
-    }
-
-    function sameTypeText() {
-        return getPortalLanguage() === "ja" ? "同種ブロック移動" : "Go to Same-Type Block";
-    }
-
     function subroutineText(direction) {
         const ja = getPortalLanguage() === "ja";
         return direction === "source"
@@ -288,28 +249,6 @@
     function registerMenus() {
         if (menusRegistered) return;
         const Scope = _Blockly.ContextMenuRegistry.ScopeType;
-
-        const sameTypeItem = {
-            id: "blockUtilityGoToSameType",
-            displayText: () => sameTypeText(),
-            scopeType: Scope.BLOCK,
-            weight: 90,
-            preconditionFn: scope => {
-                const block = scope && scope.block;
-                const typeName = getGenericBlockType(block);
-                if (!typeName) return "hidden";
-                const ws = block.workspace || (_Blockly.getMainWorkspace && _Blockly.getMainWorkspace());
-                if (!ws || typeof ws.getAllBlocks !== "function") return "hidden";
-                return ws.getAllBlocks(false).some(candidate =>
-                    candidate && candidate !== block && getGenericBlockType(candidate) === typeName
-                ) ? "enabled" : "hidden";
-            },
-            callback: scope => {
-                if (scope && scope.block) goToSameTypeBlock(scope.block);
-            }
-        };
-        plugin.registerItem(sameTypeItem);
-        _Blockly.ContextMenuRegistry.registry.register(sameTypeItem);
 
         const subroutineItem = {
             id: "blockUtilityGoToSubroutine",
