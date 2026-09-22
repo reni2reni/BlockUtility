@@ -251,6 +251,8 @@
     // Copy / Cut / Paste + Shift multi-select
     // ================================================================
     const clipboardState = { lastBlockJson: null };
+    // 最後に記録したマウス位置。ペーストはこの位置を基準にする。
+    let lastCursorClientPoint = { x: 0, y: 0 };
     const multiSelectedBlockIds = new Set();
     let contextSelectedBlockIds = [];
     let multiSelectionInstalled = false;
@@ -643,7 +645,11 @@
         try { data = JSON.parse(raw); } catch (_) { return; }
         const validBlocks = data?._bf6MultiBlockClipboard === 1 && Array.isArray(data.blocks) ? data.blocks.filter(Boolean) : [data].filter(Boolean);
         if (!validBlocks.length) return;
-        const base = getWorkspaceCoords(ws, { clientX: window.innerWidth / 2, clientY: window.innerHeight / 2 });
+        // 画面中央ではなく、最後に記録したカーソル位置へ貼り付ける。
+        const base = getWorkspaceCoords(ws, {
+            clientX: Number(lastCursorClientPoint.x) || 0,
+            clientY: Number(lastCursorClientPoint.y) || 0
+        });
         const positions = validBlocks.map((d, i) => ({ x: Number.isFinite(Number(d?.x)) ? Number(d.x) : i * 40, y: Number.isFinite(Number(d?.y)) ? Number(d.y) : i * 40 }));
         const minX = Math.min(...positions.map(p => p.x)), minY = Math.min(...positions.map(p => p.y));
         const created = [];
@@ -676,6 +682,19 @@
             document.head.appendChild(style);
         }
 
+        // カーソル位置を常時記録。Ctrl/Cmd+V やメニューからの貼り付けでも
+        // 最後にマウスがあった場所へ貼り付けられるようにする。
+        window.addEventListener("pointermove", e => {
+            if (typeof e.clientX === "number" && typeof e.clientY === "number") {
+                lastCursorClientPoint = { x: e.clientX, y: e.clientY };
+            }
+        }, true);
+        window.addEventListener("pointerdown", e => {
+            if (typeof e.clientX === "number" && typeof e.clientY === "number") {
+                lastCursorClientPoint = { x: e.clientX, y: e.clientY };
+            }
+        }, true);
+
         // ★ 重要: Shift+クリックは pointerdown の1回だけで処理する。
         // click側で再度toggleすると、1クリックで追加→解除されてしまう。
         window.addEventListener("pointerdown", e => {
@@ -707,6 +726,9 @@
         }, true);
 
         document.addEventListener("contextmenu", e => {
+            if (typeof e.clientX === "number" && typeof e.clientY === "number") {
+                lastCursorClientPoint = { x: e.clientX, y: e.clientY };
+            }
             const id = getBlockIdFromEvent(e);
             if (id && !multiSelectedBlockIds.has(String(id))) {
                 multiSelectedBlockIds.clear();
