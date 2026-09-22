@@ -248,8 +248,7 @@
 
 
     // ================================================================
-    // Copy / Cut / Paste (multi-select)
-    // BF6PORTAL の旧 ExperienceManager 拡張から移設した実装。
+    // Copy / Cut / Paste + Shift multi-select
     // ================================================================
     const clipboardState = { lastBlockJson: null };
     const multiSelectedBlockIds = new Set();
@@ -257,15 +256,22 @@
     let multiSelectionInstalled = false;
     let clipboardMenusRegistered = false;
 
+    function getMainWorkspace() {
+        try { return _Blockly.getMainWorkspace?.() || null; } catch (_) { return null; }
+    }
+
     function copyTextToClipboard(text) {
         if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
             return navigator.clipboard.writeText(String(text ?? ""));
         }
         const ta = document.createElement("textarea");
         ta.value = String(text ?? "");
-        ta.style.position = "fixed"; ta.style.opacity = "0";
-        document.body.appendChild(ta); ta.focus(); ta.select();
-        const ok = document.execCommand("copy"); ta.remove();
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        const ok = document.execCommand("copy");
+        ta.remove();
         if (!ok) throw new Error("Clipboard copy failed");
         return Promise.resolve(true);
     }
@@ -277,20 +283,44 @@
         return null;
     }
 
-    function getBlockElement(blockId) {
-        try { return document.querySelector(`g[data-id="${CSS.escape(String(blockId))}"]`); }
-        catch (_) { return null; }
+    function getBlockIdFromEvent(event) {
+        try {
+            const target = event?.target;
+            if (!target) return null;
+
+            // まず composedPath を使う。SVGのpath/g要素、Shadow DOM等でも拾いやすい。
+            const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+            for (const el of path) {
+                if (!el || typeof el.getAttribute !== "function") continue;
+                const id = el.getAttribute("data-id") || el.dataset?.id;
+                if (id) return String(id);
+            }
+
+            // 通常のSVG DOM。
+            const g = target.closest?.("g[data-id]");
+            if (g) {
+                const id = g.getAttribute("data-id") || g.dataset?.id;
+                if (id) return String(id);
+            }
+
+            // BlocklyのSVG rootからblockを逆引きするフォールバック。
+            const ws = getMainWorkspace();
+            const blocks = ws?.getAllBlocks?.(false) || [];
+            for (const block of blocks) {
+                const root = block?.getSvgRoot?.();
+                if (root && (root === target || root.contains?.(target))) return String(block.id);
+            }
+        } catch (_) {}
+        return null;
     }
 
     function getBlockElement(blockId) {
         if (!blockId) return null;
         try {
-            const ws = _Blockly.getMainWorkspace?.();
+            const ws = getMainWorkspace();
             const block = ws?.getBlockById?.(String(blockId));
-            if (block && typeof block.getSvgRoot === "function") {
-                const root = block.getSvgRoot();
-                if (root) return root;
-            }
+            const root = block?.getSvgRoot?.();
+            if (root) return root;
         } catch (_) {}
         try {
             const id = String(blockId).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -304,18 +334,13 @@
                 el.classList.remove("bf6-path-selected")
             );
 
-            // 選択対象ブロック自身の直属 path だけをハイライトする。
-            // querySelectorAll("path") で子ブロックまで拾わないのが重要。
+            // 選択したブロック自身の直属blocklyPathだけを塗る。
+            // getDescendants/querySelectorAllで子ブロックを拾わない。
             for (const id of multiSelectedBlockIds) {
                 const blockEl = getBlockElement(id);
                 if (!blockEl) continue;
-
                 for (const child of blockEl.children || []) {
-                    if (
-                        child.tagName &&
-                        child.tagName.toLowerCase() === "path" &&
-                        child.classList?.contains("blocklyPath")
-                    ) {
+                    if (child.tagName?.toLowerCase() === "path" && child.classList?.contains("blocklyPath")) {
                         child.classList.add("bf6-path-selected");
                     }
                 }
@@ -326,69 +351,358 @@
     function clearMultiSelection() {
         multiSelectedBlockIds.clear();
         contextSelectedBlockIds = [];
-        paintMultiSelection();
+        document.querySelectorAll(".bf6-path-selected").forEach(el => el.classList.remove("bf6-path-selected"));
     }
 
-    function addOrToggleMultiSelection(id) {
-        if (!id) return;
-        id = String(id);
+    function addOrToggleMultiSelection(blockId) {
+        if (!blockId) return;
+        const id = String(blockId);
         if (multiSelectedBlockIds.has(id)) multiSelectedBlockIds.delete(id);
         else multiSelectedBlockIds.add(id);
         paintMultiSelection();
-        return Array.from(multiSelectedBlockIds);
+    }
+
+    function getSelectedBlocksByIds(ids) {
+        const ws = getMainWorkspace();
+        if (!ws) return [];
+        const result = [];
+        const seen = new Set();
+        for (const id of (Array.isArray(ids) ? ids : [])) {
+            try {
+                let block = ws.getBlockById?.(String(id)) || null;
+                if (!block) {
+                    const all = ws.getAllBlocks?.(false) || [];
+                    block = all.find(b => String(b?.id) === String(id)) || null;
+                }
+                if (block && !seen.has(String(block.id))) {
+                    seen.add(String(block.id));
+                    result.push(block);
+                }
+            } catch (_) {}
+        }
+        return result;
+    }
+
+    function getCopyRoots(selectedBlocks) {
+        const selectedSet = new Set(selectedBlocks);
+        return selectedBlocks.filter(block => {
+            let parent = block?.getParent?.() || null;
+            if (!parent) return true;
+            while (parent) {
+                if (selectedSet.has(parent)) {
+                    // 入力にぶら下がる子は親のserializationに含まれるので除外。
+                    // previous/nextで連結された兄弟は除外しない。
+                    let isInputChild = false;
+                    try {
+                        if (Array.isArray(parent.inputList)) {
+                            isInputChild = parent.inputList.some(input => input?.connection?.targetBlock?.() === block);
+                        }
+                    } catch (_) {}
+                    if (isInputChild) return false;
+                }
+                parent = parent.getParent?.() || null;
+            }
+            return true;
+        });
+    }
+
+    function extractBlockForClipboard(block) {
+        try {
+            const full = _Blockly.serialization.blocks.save(block);
+            if (full && full.next) delete full.next;
+            return full;
+        } catch (_) {
+            try {
+                if (_Blockly.Xml) {
+                    const xml = _Blockly.Xml.blockToDom(block, true);
+                    return { _legacyXml: _Blockly.Xml.domToText(xml) };
+                }
+            } catch (_) {}
+            return null;
+        }
+    }
+
+    function traverseSerializedBlocks(node, cb) {
+        if (!node) return;
+        cb(node);
+        if (node.inputs && typeof node.inputs === "object") {
+            for (const input of Object.values(node.inputs)) {
+                if (input?.block) traverseSerializedBlocks(input.block, cb);
+                if (input?.shadow) traverseSerializedBlocks(input.shadow, cb);
+            }
+        }
+        if (node.next?.block) traverseSerializedBlocks(node.next.block, cb);
+    }
+
+    function extractVariableDefinitions(serializedRoot) {
+        const varsById = new Map();
+        traverseSerializedBlocks(serializedRoot, b => {
+            if (!b.fields?.VAR) return;
+            const raw = b.fields.VAR;
+            let id = null, name = null, type = "";
+            if (raw && typeof raw === "object") {
+                id = raw.id || null; name = raw.name || null; type = raw.type || "";
+            } else if (typeof raw === "string") name = raw;
+            const isObjectVar = !!b.extraState?.isObjectVar;
+            if (name) {
+                const key = id || name + "::" + type;
+                if (!varsById.has(key)) varsById.set(key, { id, name, type, isObjectVar });
+            }
+        });
+        return Array.from(varsById.values());
+    }
+
+    function registerVariablesBeforePaste(ws, defs) {
+        const varMap = ws?.getVariableMap?.();
+        for (const v of defs || []) {
+            try {
+                let existing = null;
+                try { existing = varMap?.getVariable?.(v.id); } catch (_) {}
+                if (!existing) try { existing = varMap?.getVariableById?.(v.id); } catch (_) {}
+                if (!existing) try { existing = varMap?.getVariableByName?.(v.name); } catch (_) {}
+                if (existing) continue;
+                if (varMap?.createVariable) {
+                    try { varMap.createVariable(v.name, v.type || "", v.id); }
+                    catch (_) { try { varMap.createVariable(v.name, v.type || ""); } catch (_) {} }
+                } else if (ws?.createVariable) {
+                    try { ws.createVariable(v.name, v.type || "", v.id); }
+                    catch (_) { try { ws.createVariable(v.name, v.type || ""); } catch (_) {} }
+                }
+            } catch (_) {}
+        }
+    }
+
+    function ensureVariableExists(ws, name, type) {
+        try {
+            const varMap = ws.getVariableMap?.();
+            if (!varMap) return null;
+            let existing = null;
+            try { existing = varMap.getVariable(name); } catch (_) {}
+            if (!existing) try { existing = varMap.getVariableByName?.(name); } catch (_) {}
+            if (!existing) {
+                if (varMap.createVariable) return varMap.createVariable(name, type || "", undefined);
+                if (ws.createVariable) return ws.createVariable(name, type || "", undefined);
+            }
+            return existing;
+        } catch (_) { return null; }
+    }
+
+    function sanitizeForWorkspace(ws, root) {
+        traverseSerializedBlocks(root, b => {
+            if (b.type === "variableReferenceBlock" || b.type === "subroutineArgumentBlock") return;
+            if (!b.fields) return;
+            for (const [key, val] of Object.entries(b.fields)) {
+                const ku = key.toUpperCase();
+                if (ku === "VAR" || ku === "VARIABLE" || ku.startsWith("VAR")) {
+                    const name = val && typeof val === "object" ? val.name : val;
+                    if (typeof name === "string" && name) ensureVariableExists(ws, name, val?.type || "");
+                }
+            }
+        });
+        return root;
+    }
+
+    function renameSubroutineIfNeeded(ws, data) {
+        try {
+            if (!data || data.type !== "subroutineBlock") return data;
+            const originalName = data.extraState?.subroutineName || data.fields?.SUBROUTINE_NAME;
+            if (!originalName) return data;
+            const existingNames = new Set();
+            for (const b of ws.getAllBlocks?.(false) || []) {
+                if (b.type === "subroutineBlock") {
+                    const name = b.extraState?.subroutineName || b.getField?.("SUBROUTINE_NAME")?.getValue?.();
+                    if (name) existingNames.add(name);
+                }
+            }
+            if (!existingNames.has(originalName)) return data;
+            let i = 1, newName = originalName + i;
+            while (existingNames.has(newName)) newName = originalName + (++i);
+            if (data.extraState) data.extraState.subroutineName = newName;
+            if (data.fields) data.fields.SUBROUTINE_NAME = newName;
+            traverseSerializedBlocks(data, b => {
+                if (b.fields?.SUBROUTINE_NAME === originalName) b.fields.SUBROUTINE_NAME = newName;
+            });
+            return data;
+        } catch (_) { return data; }
+    }
+
+    function createBlockInstance(ws, data) {
+        const defs = extractVariableDefinitions(data);
+        if (defs.length) registerVariablesBeforePaste(ws, defs);
+        data = renameSubroutineIfNeeded(ws, data);
+        data = sanitizeForWorkspace(ws, data);
+        const existing = new Set(ws.getAllBlocks?.(false) || []);
+        let created = null;
+        try {
+            if (_Blockly.serialization?.blocks?.append) created = _Blockly.serialization.blocks.append(data, ws);
+            else if (data._legacyXml && _Blockly.Xml) created = _Blockly.Xml.domToBlock(_Blockly.Xml.textToDom(data._legacyXml), ws);
+        } catch (_) {}
+        if (!created) {
+            for (const b of ws.getAllBlocks?.(false) || []) {
+                if (!existing.has(b) && !b.getParent?.()) { created = b; break; }
+            }
+        }
+        return created;
+    }
+
+    function getWorkspaceCoords(ws, e) {
+        try {
+            let canvas = ws.getCanvas?.() || document.querySelector(".blocklyBlockCanvas");
+            if (canvas?.ownerSVGElement?.getScreenCTM) {
+                const pt = canvas.ownerSVGElement.createSVGPoint();
+                pt.x = e?.clientX || 0; pt.y = e?.clientY || 0;
+                const ctm = canvas.getScreenCTM();
+                if (ctm?.inverse) {
+                    const p = pt.matrixTransform(ctm.inverse());
+                    return { x: p.x, y: p.y };
+                }
+            }
+        } catch (_) {}
+        const metrics = ws.getMetrics?.() || {};
+        return { x: (metrics.viewLeft || 0) + 50, y: (metrics.viewTop || 0) + 50 };
+    }
+
+    function autoConnectBlock(createdBlock) {
+        if (!createdBlock?.workspace) return;
+        const ws = createdBlock.workspace;
+        const myConns = [];
+        if (createdBlock.outputConnection) myConns.push(createdBlock.outputConnection);
+        if (createdBlock.previousConnection) myConns.push(createdBlock.previousConnection);
+        const last = createdBlock.lastConnectionInStack?.() || createdBlock;
+        if (last?.nextConnection) myConns.push(last.nextConnection);
+        if (!myConns.length) return;
+        let bestDist = 75, bestMy = null, bestTarget = null;
+        for (const other of ws.getAllBlocks?.(false) || []) {
+            if (other === createdBlock || other.getRootBlock?.() === createdBlock) continue;
+            const targets = [];
+            if (other.previousConnection) targets.push(other.previousConnection);
+            if (other.nextConnection) targets.push(other.nextConnection);
+            for (const input of other.inputList || []) if (input.connection) targets.push(input.connection);
+            for (const myC of myConns) for (const tC of targets) {
+                let can = true;
+                try {
+                    if (typeof tC.canConnectWithReason_ === "function") can = tC.canConnectWithReason_(myC) <= 1;
+                    else if (typeof tC.isConnectionAllowed === "function") can = tC.isConnectionAllowed(myC);
+                } catch (_) { can = false; }
+                if (!can) continue;
+                const dist = Math.hypot((myC.x || 0) - (tC.x || 0), (myC.y || 0) - (tC.y || 0));
+                if (dist < bestDist) { bestDist = dist; bestMy = myC; bestTarget = tC; }
+            }
+        }
+        if (bestMy && bestTarget) {
+            try {
+                if (bestTarget.type === 1 || bestTarget.type === 3) bestTarget.connect(bestMy);
+                else bestMy.connect(bestTarget);
+                createdBlock.render?.();
+            } catch (_) {}
+        }
+    }
+
+    async function copyBlocks(fallbackBlock) {
+        const ws = getMainWorkspace();
+        if (!ws) return;
+        const ids = contextSelectedBlockIds.length ? contextSelectedBlockIds :
+            (multiSelectedBlockIds.size ? Array.from(multiSelectedBlockIds) : [fallbackBlock?.id].filter(Boolean));
+        const selected = getSelectedBlocksByIds(ids);
+        const blocks = getCopyRoots(selected.length ? selected : [fallbackBlock].filter(Boolean))
+            .map(extractBlockForClipboard).filter(Boolean);
+        if (!blocks.length) return;
+        const data = blocks.length > 1 ? { _bf6MultiBlockClipboard: 1, blocks } : blocks[0];
+        const text = JSON.stringify(data, null, 2);
+        clipboardState.lastBlockJson = text;
+        await copyTextToClipboard(text);
+    }
+
+    async function cutBlocks(fallbackBlock) {
+        const ws = getMainWorkspace();
+        if (!ws) return;
+        const ids = contextSelectedBlockIds.length ? contextSelectedBlockIds :
+            (multiSelectedBlockIds.size ? Array.from(multiSelectedBlockIds) : [fallbackBlock?.id].filter(Boolean));
+        const selected = getSelectedBlocksByIds(ids);
+        const roots = getCopyRoots(selected.length ? selected : [fallbackBlock].filter(Boolean));
+        const blocks = roots.map(extractBlockForClipboard).filter(Boolean);
+        if (!blocks.length) return;
+        const data = blocks.length > 1 ? { _bf6MultiBlockClipboard: 1, blocks } : blocks[0];
+        const text = JSON.stringify(data, null, 2);
+        clipboardState.lastBlockJson = text;
+        await copyTextToClipboard(text);
+        for (const block of roots) { try { block.dispose?.(true, true); } catch (_) {} }
+        clearMultiSelection();
+        ws.resizeContents?.();
+    }
+
+    async function pasteBlocks() {
+        const ws = getMainWorkspace();
+        if (!ws) return;
+        const raw = await readTextFromClipboard() || clipboardState.lastBlockJson;
+        if (!raw) return;
+        let data;
+        try { data = JSON.parse(raw); } catch (_) { return; }
+        const validBlocks = data?._bf6MultiBlockClipboard === 1 && Array.isArray(data.blocks) ? data.blocks.filter(Boolean) : [data].filter(Boolean);
+        if (!validBlocks.length) return;
+        const base = getWorkspaceCoords(ws, { clientX: window.innerWidth / 2, clientY: window.innerHeight / 2 });
+        const positions = validBlocks.map((d, i) => ({ x: Number.isFinite(Number(d?.x)) ? Number(d.x) : i * 40, y: Number.isFinite(Number(d?.y)) ? Number(d.y) : i * 40 }));
+        const minX = Math.min(...positions.map(p => p.x)), minY = Math.min(...positions.map(p => p.y));
+        const created = [];
+        try {
+            _Blockly.Events?.disable?.();
+            for (let i = 0; i < validBlocks.length; i++) {
+                const b = createBlockInstance(ws, validBlocks[i]);
+                if (!b) continue;
+                const C = _Blockly.utils?.Coordinate || function(x,y){this.x=x;this.y=y;};
+                b.moveTo?.(new C(base.x + positions[i].x - minX, base.y + positions[i].y - minY));
+                b.render?.();
+                created.push(b);
+            }
+            if (created.length === 1) autoConnectBlock(created[0]);
+            ws.resizeContents?.();
+        } finally { _Blockly.Events?.enable?.(); }
+        const CreateEvent = _Blockly.Events?.BlockCreate || _Blockly.Events?.Create;
+        if (created.length && typeof CreateEvent === "function") {
+            for (const b of created) { try { _Blockly.Events.fire(new CreateEvent(b)); } catch (_) {} }
+        }
     }
 
     function installMultiSelection() {
         if (multiSelectionInstalled) return;
         multiSelectionInstalled = true;
-
         if (!document.getElementById("blockUtility-multi-select-style")) {
             const style = document.createElement("style");
             style.id = "blockUtility-multi-select-style";
-            style.textContent =
-                `path.bf6-path-selected { stroke:#66ccff !important; stroke-width:3px !important; filter:brightness(1.18); }`;
+            style.textContent = `path.bf6-path-selected { stroke:#66ccff !important; stroke-width:3px !important; filter:brightness(1.18); }`;
             document.head.appendChild(style);
         }
 
-        // Blockly の click 処理より先に pointerdown を捕まえる。
-        // これにより SHIFT+クリック 1回で確実に追加/解除する。
+        // ★ 重要: Shift+クリックは pointerdown の1回だけで処理する。
+        // click側で再度toggleすると、1クリックで追加→解除されてしまう。
         window.addEventListener("pointerdown", e => {
-            if (e.button !== 0) return;
-
-            if (e.shiftKey) {
-                const blockId = getBlockIdFromEvent(e);
-                if (!blockId) return;
-
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation?.();
-
-                addOrToggleMultiSelection(blockId);
-                return;
-            }
-
-            // 通常クリックでは独自の複数選択だけ解除。
-            // Blockly 本来の単一選択はそのまま動かす。
-            const onMenu =
-                e.target?.closest?.(".blocklyWidgetDiv") ||
-                e.target?.closest?.(".bf6-experience-manager-options-submenu");
-            if (!onMenu) {
-                clearMultiSelection();
-            }
+            if (e.button !== 0 || !e.shiftKey) return;
+            const id = getBlockIdFromEvent(e);
+            if (!id) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation?.();
+            addOrToggleMultiSelection(id);
         }, true);
 
-        // pointerdown 後の click で Blockly 側が選択状態を変更したり、
-        // 2回目のクリックを要求したりしないよう SHIFT+クリックを止める。
+        // Shift+クリックから発生するclickをBlocklyへ渡さない。
+        // ただしここでは選択状態を変更しない。
         window.addEventListener("click", e => {
-            if (!e.shiftKey) return;
+            if (e.button !== 0 || !e.shiftKey) return;
             if (!getBlockIdFromEvent(e)) return;
-
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation?.();
         }, true);
 
-        // 右クリック時点の選択集合を固定。
+        // Shiftなしの通常クリックは独自の複数選択を解除するだけ。
+        window.addEventListener("pointerdown", e => {
+            if (e.button !== 0 || e.shiftKey) return;
+            const target = e.target;
+            if (target?.closest?.(".blocklyWidgetDiv, .blocklyContextMenu, .blocklyDropDownDiv")) return;
+            if (multiSelectedBlockIds.size) clearMultiSelection();
+        }, true);
+
         document.addEventListener("contextmenu", e => {
             const id = getBlockIdFromEvent(e);
             if (id && !multiSelectedBlockIds.has(String(id))) {
@@ -399,26 +713,41 @@
             contextSelectedBlockIds = Array.from(multiSelectedBlockIds);
         }, true);
 
-        // Blockly の再描画で SVG が作り直されても選択表示を復元。
         new MutationObserver(() => {
             if (multiSelectedBlockIds.size) paintMultiSelection();
-        }).observe(document.body || document.documentElement, {
-            childList: true,
-            subtree: true
-        });
+        }).observe(document.body || document.documentElement, { childList:true, subtree:true });
     }
 
     function registerClipboardMenus() {
         if (clipboardMenusRegistered) return;
-        clipboardMenusRegistered = true; installMultiSelection();
+        clipboardMenusRegistered = true;
+        installMultiSelection();
         const Scope = _Blockly.ContextMenuRegistry.ScopeType;
         const items = [
-            { id:"blockUtilityCopyBlock", displayText:() => getPortalLanguage()==="ja"?"コピー":"Copy", scopeType:Scope.BLOCK, weight:110,
-              preconditionFn:s => s?.block?"enabled":"hidden", callback:s => copyBlocks(s.block).catch(e => BF2042Portal.Shared?.logError?.("BlockUtility copy",String(e))) },
-            { id:"blockUtilityCutBlock", displayText:() => getPortalLanguage()==="ja"?"切り取り":"Cut", scopeType:Scope.BLOCK, weight:109,
-              preconditionFn:s => s?.block?"enabled":"hidden", callback:s => cutBlocks(s.block).catch(e => BF2042Portal.Shared?.logError?.("BlockUtility cut",String(e))) },
-            { id:"blockUtilityPasteBlock", displayText:() => getPortalLanguage()==="ja"?"貼り付け":"Paste", scopeType:Scope.WORKSPACE, weight:110,
-              preconditionFn:()=>"enabled", callback:() => pasteBlocks().catch(e => BF2042Portal.Shared?.logError?.("BlockUtility paste",String(e))) }
+            {
+                id: "blockUtilityCopyBlock",
+                displayText: () => getPortalLanguage() === "ja" ? "コピー" : "Copy",
+                scopeType: Scope.BLOCK,
+                weight: 110,
+                preconditionFn: s => s?.block ? "enabled" : "hidden",
+                callback: s => copyBlocks(s.block).catch(e => BF2042Portal.Shared?.logError?.("BlockUtility copy", String(e)))
+            },
+            {
+                id: "blockUtilityCutBlock",
+                displayText: () => getPortalLanguage() === "ja" ? "切り取り" : "Cut",
+                scopeType: Scope.BLOCK,
+                weight: 109,
+                preconditionFn: s => s?.block ? "enabled" : "hidden",
+                callback: s => cutBlocks(s.block).catch(e => BF2042Portal.Shared?.logError?.("BlockUtility cut", String(e)))
+            },
+            {
+                id: "blockUtilityPasteBlock",
+                displayText: () => getPortalLanguage() === "ja" ? "貼り付け" : "Paste",
+                scopeType: Scope.WORKSPACE,
+                weight: 110,
+                preconditionFn: () => "enabled",
+                callback: () => pasteBlocks().catch(e => BF2042Portal.Shared?.logError?.("BlockUtility paste", String(e)))
+            }
         ];
         for (const item of items) {
             plugin.registerItem(item);
