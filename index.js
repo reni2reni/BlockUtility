@@ -405,6 +405,8 @@
     function extractBlockForClipboard(block) {
         try {
             const full = _Blockly.serialization.blocks.save(block);
+            // スタック接続(next)は個別に選択したブロック同士の関係として
+            // 別途保存するので、ここでは切り離しておく。
             if (full && full.next) delete full.next;
             return full;
         } catch (_) {
@@ -416,6 +418,40 @@
             } catch (_) {}
             return null;
         }
+    }
+
+    function buildClipboardData(roots) {
+        const blocks = [];
+        const sourceIds = [];
+        const selectedIds = new Set((roots || []).map(b => String(b?.id)).filter(Boolean));
+        const connections = [];
+
+        for (const block of roots || []) {
+            const data = extractBlockForClipboard(block);
+            if (!data) continue;
+            blocks.push(data);
+            sourceIds.push(String(block.id));
+        }
+
+        // 「元々つながっていた」ことだけを記憶する。
+        // これにより、無関係なブロック同士が近くに貼られても自動接続しない。
+        for (const block of roots || []) {
+            if (!block?.nextConnection) continue;
+            try {
+                const target = block.nextConnection.targetBlock?.();
+                if (target && selectedIds.has(String(target.id))) {
+                    connections.push({ from: String(block.id), to: String(target.id) });
+                }
+            } catch (_) {}
+        }
+
+        if (blocks.length <= 1) return blocks[0] || null;
+        return {
+            _bf6MultiBlockClipboard: 1,
+            blocks,
+            sourceIds,
+            connections
+        };
     }
 
     function traverseSerializedBlocks(node, cb) {
@@ -600,10 +636,9 @@
         const ids = contextSelectedBlockIds.length ? contextSelectedBlockIds :
             (multiSelectedBlockIds.size ? Array.from(multiSelectedBlockIds) : [fallbackBlock?.id].filter(Boolean));
         const selected = getSelectedBlocksByIds(ids);
-        const blocks = getCopyRoots(selected.length ? selected : [fallbackBlock].filter(Boolean))
-            .map(extractBlockForClipboard).filter(Boolean);
-        if (!blocks.length) return;
-        const data = blocks.length > 1 ? { _bf6MultiBlockClipboard: 1, blocks } : blocks[0];
+        const roots = getCopyRoots(selected.length ? selected : [fallbackBlock].filter(Boolean));
+        const data = buildClipboardData(roots);
+        if (!data) return;
         const text = JSON.stringify(data, null, 2);
         clipboardState.lastBlockJson = text;
         await copyTextToClipboard(text);
@@ -616,9 +651,8 @@
             (multiSelectedBlockIds.size ? Array.from(multiSelectedBlockIds) : [fallbackBlock?.id].filter(Boolean));
         const selected = getSelectedBlocksByIds(ids);
         const roots = getCopyRoots(selected.length ? selected : [fallbackBlock].filter(Boolean));
-        const blocks = roots.map(extractBlockForClipboard).filter(Boolean);
-        if (!blocks.length) return;
-        const data = blocks.length > 1 ? { _bf6MultiBlockClipboard: 1, blocks } : blocks[0];
+        const data = buildClipboardData(roots);
+        if (!data) return;
         const text = JSON.stringify(data, null, 2);
         clipboardState.lastBlockJson = text;
         await copyTextToClipboard(text);
@@ -643,8 +677,11 @@
         if (!raw) return;
         let data;
         try { data = JSON.parse(raw); } catch (_) { return; }
-        const validBlocks = data?._bf6MultiBlockClipboard === 1 && Array.isArray(data.blocks) ? data.blocks.filter(Boolean) : [data].filter(Boolean);
+        const isMulti = data?._bf6MultiBlockClipboard === 1 && Array.isArray(data.blocks);
+        const validBlocks = isMulti ? data.blocks.filter(Boolean) : [data].filter(Boolean);
         if (!validBlocks.length) return;
+        const sourceIds = isMulti && Array.isArray(data.sourceIds) ? data.sourceIds.map(String) : [];
+        const connections = isMulti && Array.isArray(data.connections) ? data.connections : [];
         // 画面中央ではなく、最後に記録したカーソル位置へ貼り付ける。
         const base = getWorkspaceCoords(ws, {
             clientX: Number(lastCursorClientPoint.x) || 0,
@@ -663,7 +700,33 @@
                 b.render?.();
                 created.push(b);
             }
-            if (created.length === 1) autoConnectBlock(created[0]);
+            if (created.length === 1) {
+                // 単独ペーストは従来どおり、近い接続先があれば自動接続。
+                autoConnectBlock(created[0]);
+            } else if (isMulti && connections.length) {
+                // 複数選択では「元々連結していた組」だけを対象にする。
+                // 無関係なブロック同士は近くに置かれても接続しない。
+                const createdBySourceId = new Map();
+                created.forEach((b, i) => {
+                    const sid = sourceIds[i];
+                    if (sid != null) createdBySourceId.set(String(sid), b);
+                });
+                for (const pair of connections) {
+                    const from = createdBySourceId.get(String(pair?.from));
+                    const to = createdBySourceId.get(String(pair?.to));
+                    if (!from || !to || !from.nextConnection || !to.previousConnection) continue;
+                    try {
+                        const a = from.nextConnection;
+                        const b = to.previousConnection;
+                        const dist = Math.hypot((a.x || 0) - (b.x || 0), (a.y || 0) - (b.y || 0));
+                        // きっちり上下に並んでいる場合だけ接続。
+                        if (dist <= 36 && !a.isConnected?.() && !b.isConnected?.()) {
+                            a.connect(b);
+                        }
+                    } catch (_) {}
+                }
+                created.forEach(b => b.render?.());
+            }
             ws.resizeContents?.();
         } finally { _Blockly.Events?.enable?.(); }
         const CreateEvent = _Blockly.Events?.BlockCreate || _Blockly.Events?.Create;
