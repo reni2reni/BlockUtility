@@ -383,27 +383,21 @@
         return result;
     }
 
+    // 複数選択コピーでは「選択されたID」をそのままコピー対象にする。
+    // 親ブロックが選択されていても、同時に選択された子ブロックを落とさない。
+    // これにより、ルールブロック(親)＋その中の子、または子だけを
+    // 複数選択した場合でも、選択したものをすべてコピーできる。
     function getCopyRoots(selectedBlocks) {
-        const selectedSet = new Set(selectedBlocks);
-        return selectedBlocks.filter(block => {
-            let parent = block?.getParent?.() || null;
-            if (!parent) return true;
-            while (parent) {
-                if (selectedSet.has(parent)) {
-                    // 入力にぶら下がる子は親のserializationに含まれるので除外。
-                    // previous/nextで連結された兄弟は除外しない。
-                    let isInputChild = false;
-                    try {
-                        if (Array.isArray(parent.inputList)) {
-                            isInputChild = parent.inputList.some(input => input?.connection?.targetBlock?.() === block);
-                        }
-                    } catch (_) {}
-                    if (isInputChild) return false;
-                }
-                parent = parent.getParent?.() || null;
-            }
-            return true;
-        });
+        const result = [];
+        const seen = new Set();
+        for (const block of selectedBlocks || []) {
+            if (!block || block.id == null) continue;
+            const id = String(block.id);
+            if (seen.has(id)) continue;
+            seen.add(id);
+            result.push(block);
+        }
+        return result;
     }
 
     function extractBlockForClipboard(block) {
@@ -626,7 +620,16 @@
         const text = JSON.stringify(data, null, 2);
         clipboardState.lastBlockJson = text;
         await copyTextToClipboard(text);
-        for (const block of roots) { try { block.dispose?.(true, true); } catch (_) {} }
+        // 親子を同時選択しても安全なように、子から先に処理する。
+        const disposeOrder = roots.slice().sort((a, b) => {
+            const depth = block => {
+                let d = 0, p = block?.getParent?.() || null;
+                while (p && d < 1000) { d++; p = p.getParent?.() || null; }
+                return d;
+            };
+            return depth(b) - depth(a);
+        });
+        for (const block of disposeOrder) { try { block.dispose?.(true, true); } catch (_) {} }
         clearMultiSelection();
         ws.resizeContents?.();
     }
