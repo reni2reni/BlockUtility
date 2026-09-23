@@ -699,7 +699,7 @@
         // 元々連結していたブロックを含む貼り付けでは、連結関係を
         // 崩さないためオフセットを追加しない。
         const independentPasteOffset = (isMulti && connections.length === 0)
-            ? { x: 24, y: 24 }
+            ? { x: 32, y: 32 }
             : { x: 0, y: 0 };
         const positions = validBlocks.map((d, i) => {
             const p = d?._bf6Position;
