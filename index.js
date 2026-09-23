@@ -391,6 +391,43 @@
         return true;
     }
 
+    function getSearchDescendants(block) {
+        const descendants = [];
+        if (!block) return descendants;
+        try {
+            if (typeof block.getDescendants === "function") {
+                for (const child of block.getDescendants(false) || []) {
+                    if (child && child !== block) descendants.push(child);
+                }
+                return descendants;
+            }
+        } catch (_) {}
+        try {
+            const walk = current => {
+                if (!current || typeof current.getChildren !== "function") return;
+                for (const child of current.getChildren(false) || []) {
+                    if (!child) continue;
+                    descendants.push(child);
+                    walk(child);
+                }
+            };
+            walk(block);
+        } catch (_) {}
+        return descendants;
+    }
+
+    function isOuterSearchMatch(block, query) {
+        if (!block || !query) return false;
+        // ブロックの中にさらに検索対象となる子ブロックがある場合、
+        // 外側のブロックは数えない。
+        // 例: 「変数」を表示する外側ブロックの中に
+        // 変数そのもののブロックが入っている場合は、内側だけを対象にする。
+        for (const child of getSearchDescendants(block)) {
+            if (searchTextForBlock(child).includes(query)) return true;
+        }
+        return false;
+    }
+
     function searchBlocks(seedText) {
         const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
         if (typeof seedText === "string" && blockSearchInput) {
@@ -409,7 +446,9 @@
             return;
         }
 
-        blockSearchMatches = ws.getAllBlocks(false).filter(block => searchTextForBlock(block).includes(query));
+        blockSearchMatches = ws.getAllBlocks(false).filter(block =>
+            searchTextForBlock(block).includes(query) && !isOuterSearchMatch(block, query)
+        );
         blockSearchIndex = 0;
         if (blockSearchInput) blockSearchInput.dataset.lastQuery = query;
 
