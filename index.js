@@ -531,10 +531,28 @@
             "font-size:13px", "cursor:pointer"
         ].join(";");
 
+        const stopButton = document.createElement("button");
+        stopButton.type = "button";
+        stopButton.textContent = ja ? "中止" : "Stop";
+        stopButton.title = ja ? "検索を中止" : "Stop search";
+        stopButton.style.cssText = [
+            "height:30px", "padding:0 10px", "border:1px solid #687785",
+            "border-radius:4px", "background:#343b43", "color:#f2f5f7",
+            "font-size:13px", "cursor:pointer"
+        ].join(";");
+
         const result = document.createElement("span");
         result.style.cssText = "min-width:48px;text-align:right;font-size:11px;color:#9edfed;";
 
         button.addEventListener("click", searchBlocks);
+        stopButton.addEventListener("click", event => {
+            event.stopPropagation();
+            removeBlockSearchHighlight();
+            blockSearchMatches = [];
+            blockSearchIndex = 0;
+            if (blockSearchInput) blockSearchInput.dataset.lastQuery = "";
+            if (blockSearchResult) blockSearchResult.textContent = "";
+        });
         input.addEventListener("keydown", event => {
             if (event.key !== "Enter") return;
             const query = String(input.value || "").trim().toLowerCase();
@@ -547,6 +565,7 @@
 
         body.appendChild(input);
         body.appendChild(button);
+        body.appendChild(stopButton);
         body.appendChild(result);
         panel.appendChild(title);
         panel.appendChild(body);
