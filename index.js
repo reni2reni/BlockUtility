@@ -246,6 +246,221 @@
         return getPortalLanguage() === "ja" ? "ルール番号付加" : "Add Rule Numbers";
     }
 
+
+    // ===== ブロック検索パネル =====
+    let blockSearchPanel = null;
+    let blockSearchInput = null;
+    let blockSearchResult = null;
+    let blockSearchMatches = [];
+    let blockSearchIndex = 0;
+    let blockSearchHighlight = null;
+    let blockSearchDragState = null;
+
+    function searchTextForBlock(block) {
+        if (!block) return "";
+        const parts = [];
+        try {
+            if (block.type) parts.push(String(block.type));
+            if (typeof block.toString === "function") parts.push(String(block.toString()));
+        } catch (_) {}
+        try {
+            if (Array.isArray(block.inputList)) {
+                for (const input of block.inputList) {
+                    if (!input || !Array.isArray(input.fieldRow)) continue;
+                    for (const field of input.fieldRow) {
+                        if (!field) continue;
+                        try {
+                            if (typeof field.getText === "function") parts.push(String(field.getText() || ""));
+                            else if (typeof field.getValue === "function") parts.push(String(field.getValue() || ""));
+                        } catch (_) {}
+                    }
+                }
+            }
+        } catch (_) {}
+        return parts.join(" ").toLowerCase();
+    }
+
+    function removeBlockSearchHighlight() {
+        if (blockSearchHighlight && blockSearchHighlight.parentNode) {
+            blockSearchHighlight.parentNode.removeChild(blockSearchHighlight);
+        }
+        blockSearchHighlight = null;
+    }
+
+    function updateBlockSearchHighlight(block) {
+        removeBlockSearchHighlight();
+        if (!block || typeof block.getSvgRoot !== "function") return;
+        const root = block.getSvgRoot();
+        if (!root || typeof root.getBoundingClientRect !== "function") return;
+        const rect = root.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+
+        const highlight = document.createElement("div");
+        highlight.className = "bf6-block-search-highlight";
+        highlight.style.cssText = [
+            "position:fixed", "z-index:2147483646", "pointer-events:none",
+            "box-sizing:border-box", "border:3px solid #55dfff",
+            "border-radius:5px", "box-shadow:0 0 8px rgba(85,223,255,.9)",
+            "left:" + Math.max(0, rect.left - 4) + "px",
+            "top:" + Math.max(0, rect.top - 4) + "px",
+            "width:" + (rect.width + 8) + "px",
+            "height:" + (rect.height + 8) + "px"
+        ].join(";");
+        document.body.appendChild(highlight);
+        blockSearchHighlight = highlight;
+    }
+
+    function searchBlocks() {
+        const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+        const query = blockSearchInput ? String(blockSearchInput.value || "").trim().toLowerCase() : "";
+        if (!ws || typeof ws.getAllBlocks !== "function" || !query) {
+            blockSearchMatches = [];
+            blockSearchIndex = 0;
+            removeBlockSearchHighlight();
+            if (blockSearchResult) blockSearchResult.textContent = "";
+            return;
+        }
+
+        blockSearchMatches = ws.getAllBlocks(false).filter(block => searchTextForBlock(block).includes(query));
+        blockSearchIndex = 0;
+        if (blockSearchInput) blockSearchInput.dataset.lastQuery = query;
+
+        if (!blockSearchMatches.length) {
+            removeBlockSearchHighlight();
+            if (blockSearchResult) blockSearchResult.textContent =
+                getPortalLanguage() === "ja" ? "見つかりません" : "Not found";
+            return;
+        }
+
+        const target = blockSearchMatches[0];
+        selectAndCenter(target);
+        updateBlockSearchHighlight(target);
+        if (blockSearchResult) blockSearchResult.textContent =
+            String(blockSearchIndex + 1) + " / " + String(blockSearchMatches.length);
+    }
+
+    function searchNextBlock() {
+        if (!blockSearchMatches.length) {
+            searchBlocks();
+            return;
+        }
+        blockSearchIndex = (blockSearchIndex + 1) % blockSearchMatches.length;
+        const target = blockSearchMatches[blockSearchIndex];
+        selectAndCenter(target);
+        updateBlockSearchHighlight(target);
+        if (blockSearchResult) blockSearchResult.textContent =
+            String(blockSearchIndex + 1) + " / " + String(blockSearchMatches.length);
+    }
+
+    function makeBlockSearchPanelDraggable(panel, handle) {
+        handle.addEventListener("pointerdown", event => {
+            if (event.button !== 0) return;
+            const rect = panel.getBoundingClientRect();
+            blockSearchDragState = {
+                pointerId: event.pointerId,
+                offsetX: event.clientX - rect.left,
+                offsetY: event.clientY - rect.top
+            };
+            handle.setPointerCapture(event.pointerId);
+            event.preventDefault();
+        });
+        handle.addEventListener("pointermove", event => {
+            if (!blockSearchDragState || blockSearchDragState.pointerId !== event.pointerId) return;
+            const left = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth,
+                event.clientX - blockSearchDragState.offsetX));
+            const top = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight,
+                event.clientY - blockSearchDragState.offsetY));
+            panel.style.left = left + "px";
+            panel.style.top = top + "px";
+            panel.style.transform = "none";
+        });
+        const endDrag = event => {
+            if (!blockSearchDragState || blockSearchDragState.pointerId !== event.pointerId) return;
+            blockSearchDragState = null;
+            try { handle.releasePointerCapture(event.pointerId); } catch (_) {}
+        };
+        handle.addEventListener("pointerup", endDrag);
+        handle.addEventListener("pointercancel", endDrag);
+    }
+
+    function createBlockSearchPanel() {
+        if (blockSearchPanel) {
+            blockSearchPanel.style.display = "flex";
+            return;
+        }
+        const ja = getPortalLanguage() === "ja";
+        const panel = document.createElement("div");
+        panel.id = "bf6-block-search-panel";
+        panel.style.cssText = [
+            "position:fixed", "z-index:2147483645", "top:18px", "left:50%",
+            "transform:translateX(-50%)", "display:flex", "flex-direction:column",
+            "width:360px", "padding:0", "background:rgba(24,30,38,.97)",
+            "border:1px solid #667381", "border-radius:7px",
+            "box-shadow:0 5px 20px rgba(0,0,0,.45)", "color:#fff",
+            "font-family:Arial,sans-serif", "user-select:none"
+        ].join(";");
+
+        const title = document.createElement("div");
+        title.textContent = ja ? "ブロック検索" : "Block Search";
+        title.style.cssText = [
+            "height:28px", "display:flex", "align-items:center", "padding:0 10px",
+            "background:#313b47", "border-radius:6px 6px 0 0", "font-size:13px",
+            "font-weight:bold", "cursor:move"
+        ].join(";");
+
+        const body = document.createElement("div");
+        body.style.cssText = "display:flex;align-items:center;gap:6px;padding:9px;";
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.placeholder = ja ? "検索項目を入力" : "Search blocks";
+        input.autocomplete = "off";
+        input.style.cssText = [
+            "flex:1", "min-width:0", "height:30px", "box-sizing:border-box",
+            "padding:4px 8px", "border:1px solid #687785", "border-radius:4px",
+            "background:#fff", "color:#111", "font-size:13px", "user-select:text"
+        ].join(";");
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = ja ? "検索" : "Search";
+        button.style.cssText = [
+            "height:30px", "padding:0 12px", "border:1px solid #55dfff",
+            "border-radius:4px", "background:#1c6475", "color:#fff",
+            "font-size:13px", "cursor:pointer"
+        ].join(";");
+
+        const result = document.createElement("span");
+        result.style.cssText = "min-width:48px;text-align:right;font-size:11px;color:#9edfed;";
+
+        button.addEventListener("click", searchBlocks);
+        input.addEventListener("keydown", event => {
+            if (event.key !== "Enter") return;
+            const query = String(input.value || "").trim().toLowerCase();
+            if (blockSearchMatches.length && query === String(input.dataset.lastQuery || "")) {
+                searchNextBlock();
+            } else {
+                searchBlocks();
+            }
+        });
+
+        body.appendChild(input);
+        body.appendChild(button);
+        body.appendChild(result);
+        panel.appendChild(title);
+        panel.appendChild(body);
+        document.body.appendChild(panel);
+        makeBlockSearchPanelDraggable(panel, title);
+
+        blockSearchPanel = panel;
+        blockSearchInput = input;
+        blockSearchResult = result;
+    }
+
+    function blockSearchText() {
+        return getPortalLanguage() === "ja" ? "ブロック検索" : "Block Search";
+    }
+
     function registerMenus() {
         if (menusRegistered) return;
         const Scope = _Blockly.ContextMenuRegistry.ScopeType;
@@ -279,6 +494,23 @@
         };
         plugin.registerItem(sourceItem);
         _Blockly.ContextMenuRegistry.registry.register(sourceItem);
+
+        const blockSearchItem = {
+            id: "blockUtilityBlockSearch",
+            displayText: () => blockSearchText(),
+            scopeType: Scope.BLOCK,
+            weight: 86,
+            preconditionFn: () => "enabled",
+            callback: () => {
+                createBlockSearchPanel();
+                if (blockSearchInput) {
+                    blockSearchInput.focus();
+                    blockSearchInput.select();
+                }
+            }
+        };
+        plugin.registerItem(blockSearchItem);
+        _Blockly.ContextMenuRegistry.registry.register(blockSearchItem);
 
         const ruleNumberItem = {
             id: "blockUtilityAddRuleNumbers",
