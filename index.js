@@ -331,6 +331,7 @@
         const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
         const query = blockSearchInput ? String(blockSearchInput.value || "").trim().toLowerCase() : "";
         if (query && query === String(blockSearchInput && blockSearchInput.dataset.lastQuery || "") && blockSearchMatches.length) {
+            searchNextBlock();
             return;
         }
         if (!ws || typeof ws.getAllBlocks !== "function" || !query) {
