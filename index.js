@@ -238,7 +238,7 @@
     function subroutineText(direction) {
         const ja = getPortalLanguage() === "ja";
         return direction === "source"
-            ? (ja ? "サブルーチン元へ移動" : "Go to Subroutine Source")
+            ? (ja ? "呼び出し元へ移動" : "Go to the caller")
             : (ja ? "サブルーチンへ移動" : "Go to Subroutine");
     }
 
