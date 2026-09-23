@@ -254,6 +254,7 @@
     let blockSearchMatches = [];
     let blockSearchIndex = 0;
     let blockSearchHighlight = null;
+    let blockSearchHighlightStyles = [];
     let blockSearchDragState = null;
 
     function searchTextForBlock(block) {
@@ -281,9 +282,18 @@
     }
 
     function removeBlockSearchHighlight() {
-        if (blockSearchHighlight && blockSearchHighlight.parentNode) {
-            blockSearchHighlight.parentNode.removeChild(blockSearchHighlight);
+        for (const item of blockSearchHighlightStyles) {
+            try {
+                if (item.node && item.node.style) {
+                    item.node.style.stroke = item.stroke;
+                    item.node.style.strokeWidth = item.strokeWidth;
+                    item.node.style.strokeOpacity = item.strokeOpacity;
+                    item.node.style.vectorEffect = item.vectorEffect;
+                    item.node.style.filter = item.filter;
+                }
+            } catch (_) {}
         }
+        blockSearchHighlightStyles = [];
         blockSearchHighlight = null;
     }
 
@@ -291,28 +301,38 @@
         removeBlockSearchHighlight();
         if (!block || typeof block.getSvgRoot !== "function") return;
         const root = block.getSvgRoot();
-        if (!root || typeof root.getBoundingClientRect !== "function") return;
-        const rect = root.getBoundingClientRect();
-        if (!rect.width || !rect.height) return;
+        if (!root) return;
 
-        const highlight = document.createElement("div");
-        highlight.className = "bf6-block-search-highlight";
-        highlight.style.cssText = [
-            "position:fixed", "z-index:2147483646", "pointer-events:none",
-            "box-sizing:border-box", "border:3px solid #55dfff",
-            "border-radius:5px", "box-shadow:0 0 8px rgba(85,223,255,.9)",
-            "left:" + Math.max(0, rect.left - 4) + "px",
-            "top:" + Math.max(0, rect.top - 4) + "px",
-            "width:" + (rect.width + 8) + "px",
-            "height:" + (rect.height + 8) + "px"
-        ].join(";");
-        document.body.appendChild(highlight);
-        blockSearchHighlight = highlight;
+        // Blocklyのブロック自身のSVGへ枠線を付ける。
+        // 画面固定のDIVではないので、ズーム・パン・移動に追従する。
+        const nodes = root.querySelectorAll
+            ? root.querySelectorAll("path, rect, polygon, polyline, line")
+            : [];
+        for (const node of nodes) {
+            if (!node || !node.style) continue;
+            blockSearchHighlightStyles.push({
+                node,
+                stroke: node.style.stroke,
+                strokeWidth: node.style.strokeWidth,
+                strokeOpacity: node.style.strokeOpacity,
+                vectorEffect: node.style.vectorEffect,
+                filter: node.style.filter
+            });
+            node.style.stroke = "#55dfff";
+            node.style.strokeWidth = "3px";
+            node.style.strokeOpacity = "1";
+            node.style.vectorEffect = "non-scaling-stroke";
+            node.style.filter = "drop-shadow(0 0 3px rgba(85,223,255,.9))";
+        }
+        blockSearchHighlight = root;
     }
 
     function searchBlocks() {
         const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
         const query = blockSearchInput ? String(blockSearchInput.value || "").trim().toLowerCase() : "";
+        if (query && query === String(blockSearchInput && blockSearchInput.dataset.lastQuery || "") && blockSearchMatches.length) {
+            return;
+        }
         if (!ws || typeof ws.getAllBlocks !== "function" || !query) {
             blockSearchMatches = [];
             blockSearchIndex = 0;
@@ -401,12 +421,33 @@
         ].join(";");
 
         const title = document.createElement("div");
-        title.textContent = ja ? "ブロック検索" : "Block Search";
         title.style.cssText = [
-            "height:28px", "display:flex", "align-items:center", "padding:0 10px",
+            "height:28px", "display:flex", "align-items:center", "padding:0 6px 0 10px",
             "background:#313b47", "border-radius:6px 6px 0 0", "font-size:13px",
             "font-weight:bold", "cursor:move"
         ].join(";");
+
+        const titleText = document.createElement("span");
+        titleText.textContent = ja ? "ブロック検索" : "Block Search";
+        titleText.style.cssText = "flex:1;pointer-events:none;";
+
+        const closeButton = document.createElement("button");
+        closeButton.type = "button";
+        closeButton.textContent = "✕";
+        closeButton.title = ja ? "閉じる" : "Close";
+        closeButton.style.cssText = [
+            "width:24px", "height:24px", "padding:0", "border:0", "border-radius:4px",
+            "background:transparent", "color:#d7dee5", "font-size:16px", "line-height:24px",
+            "cursor:pointer", "user-select:none"
+        ].join(";");
+        closeButton.addEventListener("pointerdown", event => event.stopPropagation());
+        closeButton.addEventListener("click", event => {
+            event.stopPropagation();
+            panel.style.display = "none";
+            removeBlockSearchHighlight();
+        });
+        title.appendChild(titleText);
+        title.appendChild(closeButton);
 
         const body = document.createElement("div");
         body.style.cssText = "display:flex;align-items:center;gap:6px;padding:9px;";
@@ -418,7 +459,7 @@
         input.style.cssText = [
             "flex:1", "min-width:0", "height:30px", "box-sizing:border-box",
             "padding:4px 8px", "border:1px solid #687785", "border-radius:4px",
-            "background:#fff", "color:#111", "font-size:13px", "user-select:text"
+            "background:#20262d", "color:#f2f5f7", "caret-color:#55dfff", "font-size:13px", "user-select:text", "outline:none"
         ].join(";");
 
         const button = document.createElement("button");
@@ -498,7 +539,7 @@
         const blockSearchItem = {
             id: "blockUtilityBlockSearch",
             displayText: () => blockSearchText(),
-            scopeType: Scope.BLOCK,
+            scopeType: Scope.WORKSPACE,
             weight: 86,
             preconditionFn: () => "enabled",
             callback: () => {
