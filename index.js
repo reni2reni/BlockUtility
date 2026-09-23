@@ -327,8 +327,54 @@
         blockSearchHighlight = root;
     }
 
-    function searchBlocks() {
+    function getBlockSearchSeed(block) {
+        if (!block) return "";
+
+        // SubRoutine・変数・文字列など、ブロック上で右クリックした場合は
+        // そのブロックの入力テキストを検索欄へ自動投入する。
+        const fields = [];
+        try {
+            if (Array.isArray(block.inputList)) {
+                for (const input of block.inputList) {
+                    if (!input || !Array.isArray(input.fieldRow)) continue;
+                    for (const field of input.fieldRow) {
+                        if (!field) continue;
+                        let text = "";
+                        try {
+                            if (typeof field.getText === "function") text = String(field.getText() || "").trim();
+                            if (!text && typeof field.getValue === "function") text = String(field.getValue() || "").trim();
+                        } catch (_) {}
+                        if (!text) continue;
+                        const name = String(field.name || "").toUpperCase();
+                        fields.push({ field, name, text });
+                    }
+                }
+            }
+        } catch (_) {}
+
+        const preferred = fields.find(item =>
+            /SUBROUTINE|VARIABLE|VAR|TEXT|STRING|NAME/.test(item.name)
+        );
+        if (preferred) return preferred.text;
+
+        const editable = fields.find(item => {
+            try {
+                return item.field.EDITABLE === true ||
+                    typeof item.field.showEditor_ === "function";
+            } catch (_) {
+                return false;
+            }
+        });
+        if (editable) return editable.text;
+
+        return fields.length ? fields[0].text : "";
+    }
+
+    function searchBlocks(seedText) {
         const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+        if (typeof seedText === "string" && blockSearchInput) {
+            blockSearchInput.value = seedText;
+        }
         const query = blockSearchInput ? String(blockSearchInput.value || "").trim().toLowerCase() : "";
         if (query && query === String(blockSearchInput && blockSearchInput.dataset.lastQuery || "") && blockSearchMatches.length) {
             searchNextBlock();
@@ -402,6 +448,19 @@
         };
         handle.addEventListener("pointerup", endDrag);
         handle.addEventListener("pointercancel", endDrag);
+    }
+
+    function openBlockSearch(block) {
+        createBlockSearchPanel();
+        const seed = getBlockSearchSeed(block);
+        if (blockSearchInput && seed) {
+            blockSearchInput.value = seed;
+            blockSearchInput.dataset.lastQuery = "";
+            searchBlocks(seed);
+        } else if (blockSearchInput) {
+            blockSearchInput.focus();
+            blockSearchInput.select();
+        }
     }
 
     function createBlockSearchPanel() {
@@ -537,22 +596,35 @@
         plugin.registerItem(sourceItem);
         _Blockly.ContextMenuRegistry.registry.register(sourceItem);
 
+        // Blocklyは右クリックした対象によって context menu の scope が変わるため、
+        // BLOCK と WORKSPACE の両方に同じ「ブロック検索」を登録する。
+        // BLOCK 側では、右クリックしたブロックのテキストをそのまま検索する。
         const blockSearchItem = {
             id: "blockUtilityBlockSearch",
+            displayText: () => blockSearchText(),
+            scopeType: Scope.BLOCK,
+            weight: 86,
+            preconditionFn: scope => scope && scope.block ? "enabled" : "hidden",
+            callback: scope => {
+                openBlockSearch(scope && scope.block ? scope.block : null);
+            }
+        };
+        plugin.registerItem(blockSearchItem);
+        _Blockly.ContextMenuRegistry.registry.register(blockSearchItem);
+
+        // ブロック以外のワークスペース上でも表示する。
+        const workspaceBlockSearchItem = {
+            id: "blockUtilityBlockSearchWorkspace",
             displayText: () => blockSearchText(),
             scopeType: Scope.WORKSPACE,
             weight: 86,
             preconditionFn: () => "enabled",
             callback: () => {
-                createBlockSearchPanel();
-                if (blockSearchInput) {
-                    blockSearchInput.focus();
-                    blockSearchInput.select();
-                }
+                openBlockSearch(null);
             }
         };
-        plugin.registerItem(blockSearchItem);
-        _Blockly.ContextMenuRegistry.registry.register(blockSearchItem);
+        plugin.registerItem(workspaceBlockSearchItem);
+        _Blockly.ContextMenuRegistry.registry.register(workspaceBlockSearchItem);
 
         const ruleNumberItem = {
             id: "blockUtilityAddRuleNumbers",
