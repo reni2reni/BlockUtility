@@ -370,6 +370,27 @@
         return fields.length ? fields[0].text : "";
     }
 
+    function prepareSearchTarget(block) {
+        if (!block) return false;
+
+        // 検索ではBlocklyの通常選択を使わず、検索対象ブロック自身の
+        // SVG枠だけを表示する。これにより連結ブロックや子ブロックまで
+        // 一緒に選択されることを防ぐ。
+        try {
+            const ws = block.workspace || (_Blockly.getMainWorkspace && _Blockly.getMainWorkspace());
+            for (const candidate of ws?.getAllBlocks?.(false) || []) {
+                try {
+                    if (typeof candidate.unselect === "function") candidate.unselect();
+                } catch (_) {}
+            }
+        } catch (_) {}
+
+        removeBlockSearchHighlight();
+        centerOnBlock(block);
+        updateBlockSearchHighlight(block);
+        return true;
+    }
+
     function searchBlocks(seedText) {
         const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
         if (typeof seedText === "string" && blockSearchInput) {
@@ -400,8 +421,7 @@
         }
 
         const target = blockSearchMatches[0];
-        selectAndCenter(target);
-        updateBlockSearchHighlight(target);
+        prepareSearchTarget(target);
         if (blockSearchResult) blockSearchResult.textContent =
             String(blockSearchIndex + 1) + " / " + String(blockSearchMatches.length);
     }
@@ -413,8 +433,7 @@
         }
         blockSearchIndex = (blockSearchIndex + 1) % blockSearchMatches.length;
         const target = blockSearchMatches[blockSearchIndex];
-        selectAndCenter(target);
-        updateBlockSearchHighlight(target);
+        prepareSearchTarget(target);
         if (blockSearchResult) blockSearchResult.textContent =
             String(blockSearchIndex + 1) + " / " + String(blockSearchMatches.length);
     }
