@@ -1,7 +1,7 @@
 {
   "id": "BlockUtility",
   "name": "BlockUtility",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "BlockUtility for BF2042 Portal",
   "author": "reni2",
   "main": "index.js"
