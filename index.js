@@ -3,7 +3,12 @@
     "use strict";
 
     // BlockUtility: BF2042 Portal 用の独立ユーティリティプラグイン
-    const plugin = BF2042Portal.Plugins.getPlugin("BlockUtility");
+    const portalApi = (typeof BF2042Portal !== "undefined" ? BF2042Portal : window.BF2042Portal);
+    const plugin = portalApi?.Plugins?.getPlugin?.("BlockUtility");
+    if (!plugin) {
+        console.error("[BlockUtility] BF2042 Portal Extensions Plugin SDK is unavailable. Check that the plugin is loaded by Portal Extensions 2.x.");
+        return;
+    }
     let menusRegistered = false;
 
     function getPortalLanguage() {
