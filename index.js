@@ -896,56 +896,17 @@
     function initMinimapButton() {
         if (minimapButton && document.body.contains(minimapButton)) return;
 
-        // 1. ブロック置き場（メインキャンバスSVG）の枠の座標を取得
-        const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
-        const svgRoot = (ws && typeof ws.getParentSvg === "function" && ws.getParentSvg()) || document.querySelector('.blocklySvg');
-        const svgRect = svgRoot ? svgRoot.getBoundingClientRect() : null;
-
-        const allButtons = Array.from(document.querySelectorAll('button, [role="button"], a, div[class*="button"]'));
-
-        // 2. ブロック置き場の枠内（右側かつ上端付近）にあるボタン群（検索・Exportなど）を特定
-        const insideWorkspaceButtons = allButtons.filter(el => {
-            if (el.id === "bf6-minimap-toggle-btn") return false;
-            // 左側のブロックリストは除外
-            if (el.closest('.blocklyToolboxDiv, .blocklyFlyout, [class*="toolbox" i], [class*="flyout" i]')) return false;
-
-            const r = el.getBoundingClientRect();
-            if (r.width === 0 || r.height === 0) return false;
-
-            // テキストや属性に export や search が含まれているかをチェック
-            const text = (el.textContent + " " + (el.getAttribute("title") || "") + " " + (el.getAttribute("aria-label") || "")).toLowerCase();
-            const hasExportOrSearch = text.includes("export") || text.includes("search") || text.includes("エクスポート") || text.includes("検索");
-
-            if (svgRect) {
-                // ブロック置き場の上端付近（枠の上端〜80px以内）かつ 右側半分にあること
-                const isInsideTop = r.top >= (svgRect.top - 10) && r.top <= (svgRect.top + 80);
-                const isInsideRight = r.left >= (svgRect.left + svgRect.width * 0.4) && r.right <= (svgRect.right + 20);
-                return (isInsideTop && isInsideRight) || (hasExportOrSearch && r.top > 40);
-            }
-            return hasExportOrSearch && r.top > 40;
-        });
-
-        let targetContainer = null;
-        let leftmostButton = null;
-
-        if (insideWorkspaceButtons.length > 0) {
-            // 右上アイコン群の中で一番左にあるボタンを特定
-            insideWorkspaceButtons.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-            leftmostButton = insideWorkspaceButtons[0];
-            targetContainer = leftmostButton.parentElement;
-        }
-
-        // 3. アイコンボタンの生成
+        // 1. アイコンボタンの生成
         const btn = document.createElement("button");
         btn.type = "button";
         btn.id = "bf6-minimap-toggle-btn";
         btn.title = getPortalLanguage() === "ja" ? "全体マップ表示/移動" : "Toggle Minimap";
         btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"></polygon><line x1="9" y1="3" x2="9" y2="18"></line><line x1="15" y1="6" x2="15" y2="21"></line></svg>`;
         btn.style.cssText = [
-            "height:30px", "width:32px", "padding:0", "margin:0 4px", "display:inline-flex",
-            "align-items:center", "justify-content:center", "background:#20262d",
-            "border:1px solid #667381", "border-radius:4px", "color:#fff",
-            "cursor:pointer", "flex-shrink:0", "z-index:100"
+            "position:fixed", "z-index:100", "height:30px", "width:32px", "padding:0",
+            "display:inline-flex", "align-items:center", "justify-content:center",
+            "background:#20262d", "border:1px solid #667381", "border-radius:4px",
+            "color:#fff", "cursor:pointer", "box-shadow:0 2px 6px rgba(0,0,0,.35)"
         ].join(";");
 
         btn.onclick = (e) => {
@@ -953,23 +914,23 @@
             toggleMinimap();
         };
 
-        // 4. 右上アイコン群の左隣（検索が左に伸びても被らない位置）に挿入
-        if (targetContainer && leftmostButton) {
-            targetContainer.insertBefore(btn, leftmostButton);
-        } else if (svgRect) {
-            // フォールバック: ブロック置き場枠内の右上位置に直接オーバーレイ
-            btn.style.position = "fixed";
+        // 2. ブロック置き場（キャンバス）の枠を基準に、高さはそのまま「左端」へ配置
+        const updatePosition = () => {
+            const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+            const svgRoot = (ws && typeof ws.getParentSvg === "function" && ws.getParentSvg()) || document.querySelector('.blocklySvg');
+            if (!svgRoot) return;
+            const svgRect = svgRoot.getBoundingClientRect();
+            // 高さ: 右上アイコン群と同じ(枠の上端+12px) / 横位置: ブロックリストパネルの右隣(枠の左端+16px)
             btn.style.top = (svgRect.top + 12) + "px";
-            btn.style.right = (window.innerWidth - svgRect.right + 180) + "px";
-            document.body.appendChild(btn);
-        } else {
-            btn.style.position = "fixed";
-            btn.style.top = "100px";
-            btn.style.right = "180px";
-            document.body.appendChild(btn);
-        }
+            btn.style.left = (svgRect.left + 16) + "px";
+        };
 
+        document.body.appendChild(btn);
         minimapButton = btn;
+
+        // 初期配置＆画面リサイズ時の自動追従
+        updatePosition();
+        window.addEventListener("resize", updatePosition);
     }
 
     function initScrollWheel() {
