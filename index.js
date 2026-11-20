@@ -715,6 +715,42 @@
     let minimapAutoScrollId = null;
     let minimapEdgeDir = { x: 0, y: 0 };
 
+    function getBlockMapBounds(block) {
+        const xy = block && typeof block.getRelativeToSurfaceXY === "function"
+            ? block.getRelativeToSurfaceXY()
+            : { x: 0, y: 0 };
+
+        let width = 80;
+        let height = 40;
+
+        try {
+            if (block && typeof block.getBoundingRectangle === "function") {
+                const rect = block.getBoundingRectangle();
+                if (rect) {
+                    const rw = Number(rect.getWidth ? rect.getWidth() : rect.width);
+                    const rh = Number(rect.getHeight ? rect.getHeight() : rect.height);
+                    if (Number.isFinite(rw) && rw > 0) width = rw;
+                    if (Number.isFinite(rh) && rh > 0) height = rh;
+                    return { x: Number(xy.x) || 0, y: Number(xy.y) || 0, width, height };
+                }
+            }
+        } catch (_) { }
+
+        try {
+            if (block && typeof block.getHeightWidth === "function") {
+                const hw = block.getHeightWidth();
+                if (hw) {
+                    const hwW = Number(hw.width);
+                    const hwH = Number(hw.height);
+                    if (Number.isFinite(hwW) && hwW > 0) width = hwW;
+                    if (Number.isFinite(hwH) && hwH > 0) height = hwH;
+                }
+            }
+        } catch (_) { }
+
+        return { x: Number(xy.x) || 0, y: Number(xy.y) || 0, width, height };
+    }
+
     function getWorkspaceBounds(ws) {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         const blocks = ws.getTopBlocks ? ws.getTopBlocks(false) : [];
@@ -875,38 +911,36 @@
             ctx.strokeRect(bx, by, bw, bh);
         }
 
-        // 2. ルールブロック（赤紫＋境目）
+        // 2. ルールブロック（赤紫＋境目／個別横幅対応）
         for (const block of allBlocks) {
             if (block.type !== "ruleBlock") continue;
-            const xy = block.getRelativeToSurfaceXY ? block.getRelativeToSurfaceXY() : { x: 0, y: 0 };
-            const hw = block.getHeightWidth ? block.getHeightWidth() : { width: 80, height: 40 };
-            const bx = toMapX(xy.x);
-            const by = toMapY(xy.y);
-            const bw = Math.max(4, hw.width * zoom);
-            const bh = Math.max(4, hw.height * zoom);
+            const bnd = getBlockMapBounds(block);
+            const bx = toMapX(bnd.x);
+            const by = toMapY(bnd.y);
+            const bw = Math.max(2, bnd.width * zoom);
+            const bh = Math.max(4, bnd.height * zoom);
 
             ctx.fillStyle = "rgba(168, 43, 107, 0.75)";
             ctx.fillRect(bx, by, bw, bh);
             ctx.strokeStyle = "rgba(255, 115, 185, 0.95)";
             ctx.lineWidth = 1;
-            ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+            ctx.strokeRect(bx + 0.5, by + 0.5, Math.max(1, bw - 1), Math.max(1, bh - 1));
         }
 
-        // 3. サブルーチンブロック（茶色＋枠線）
+        // 3. サブルーチンブロック（茶色＋枠線／個別横幅対応）
         for (const block of allBlocks) {
             if (block.type !== "subroutineBlock") continue;
-            const xy = block.getRelativeToSurfaceXY ? block.getRelativeToSurfaceXY() : { x: 0, y: 0 };
-            const hw = block.getHeightWidth ? block.getHeightWidth() : { width: 80, height: 40 };
-            const bx = toMapX(xy.x);
-            const by = toMapY(xy.y);
-            const bw = Math.max(4, hw.width * zoom);
-            const bh = Math.max(4, hw.height * zoom);
+            const bnd = getBlockMapBounds(block);
+            const bx = toMapX(bnd.x);
+            const by = toMapY(bnd.y);
+            const bw = Math.max(2, bnd.width * zoom);
+            const bh = Math.max(4, bnd.height * zoom);
 
             ctx.fillStyle = "rgba(145, 78, 32, 0.85)";
             ctx.fillRect(bx, by, bw, bh);
             ctx.strokeStyle = "rgba(225, 155, 95, 0.95)";
             ctx.lineWidth = 1;
-            ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+            ctx.strokeRect(bx + 0.5, by + 0.5, Math.max(1, bw - 1), Math.max(1, bh - 1));
         }
 
         // 4. 現在の画面表示枠 (ビューポート)
@@ -981,15 +1015,14 @@
 
         for (const block of allBlocks) {
             if (block.type !== "ruleBlock" && block.type !== "subroutineBlock") continue;
-            const xy = block.getRelativeToSurfaceXY ? block.getRelativeToSurfaceXY() : { x: 0, y: 0 };
-            const hw = block.getHeightWidth ? block.getHeightWidth() : { width: 80, height: 40 };
-            const left = xy.x;
-            const top = xy.y;
-            const right = xy.x + hw.width;
-            const bottom = xy.y + hw.height;
+            const bnd = getBlockMapBounds(block);
+            const left = bnd.x;
+            const top = bnd.y;
+            const right = bnd.x + bnd.width;
+            const bottom = bnd.y + bnd.height;
 
             if (wsX >= left && wsX <= right && wsY >= top && wsY <= bottom) {
-                const area = Math.max(1, hw.width) * Math.max(1, hw.height);
+                const area = Math.max(1, bnd.width) * Math.max(1, bnd.height);
                 if (area < bestArea) {
                     bestArea = area;
                     found = block;
