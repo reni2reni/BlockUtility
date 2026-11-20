@@ -747,13 +747,8 @@
 
     function updateMinimapEdgeAutoScroll(mx, my) {
         if (!minimapCanvas) return;
-        if (minimapZoom <= 1.001) {
-            minimapEdgeDir.x = 0;
-            minimapEdgeDir.y = 0;
-            return;
-        }
 
-        const edgeZone = 40;
+        const edgeZone = 32;
         const cw = minimapCanvas.width;
         const ch = minimapCanvas.height;
 
@@ -780,7 +775,7 @@
 
         if ((dx !== 0 || dy !== 0) && !minimapAutoScrollId) {
             const step = () => {
-                if (!minimapIsOpen || minimapIsCollapsed || !minimapFocusAnchor) {
+                if (!minimapIsOpen || minimapIsCollapsed) {
                     stopMinimapEdgeAutoScroll();
                     return;
                 }
@@ -790,26 +785,20 @@
                     return;
                 }
 
-                const speed = 10.0;
-                const wsDeltaX = (minimapEdgeDir.x * speed) / data.zoom;
-                const wsDeltaY = (minimapEdgeDir.y * speed) / data.zoom;
-
-                minimapFocusAnchor.x += wsDeltaX;
-                minimapFocusAnchor.y += wsDeltaY;
-
-                const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
-                if (ws) {
-                    const targetScrollX = -(minimapFocusAnchor.x * data.scale) + (data.viewW / 2);
-                    const targetScrollY = -(minimapFocusAnchor.y * data.scale) + (data.viewH / 2);
-                    ws.scrollX = targetScrollX;
-                    ws.scrollY = targetScrollY;
-                    if (typeof ws.translate === "function") {
-                        ws.translate(targetScrollX, targetScrollY);
-                    }
-                    if (typeof ws.scroll === "function") {
-                        try { ws.scroll(targetScrollX, targetScrollY); } catch (_) { }
-                    }
+                if (!minimapFocusAnchor) {
+                    const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+                    const scale = (ws && ws.scale) || 1;
+                    const curLeft = -((ws && ws.scrollX) || 0) / scale;
+                    const curTop = -((ws && ws.scrollY) || 0) / scale;
+                    minimapFocusAnchor = {
+                        x: curLeft + (data.viewW / scale) / 2,
+                        y: curTop + (data.viewH / scale) / 2
+                    };
                 }
+
+                const speed = 7.0;
+                minimapFocusAnchor.x += (minimapEdgeDir.x * speed) / data.zoom;
+                minimapFocusAnchor.y += (minimapEdgeDir.y * speed) / data.zoom;
 
                 renderMinimap();
                 minimapAutoScrollId = requestAnimationFrame(step);
@@ -854,19 +843,12 @@
         const zoom = baseZoom * mult;
 
         let offX, offY;
-        if (Math.abs(mult - 1) < 0.001) {
-            minimapFocusAnchor = null;
-            offX = (cw - mapW * zoom) / 2;
-            offY = (ch - mapH * zoom) / 2;
-        } else {
-            if (!minimapFocusAnchor) {
-                minimapFocusAnchor = {
-                    x: curLeft + (viewW / scale) / 2,
-                    y: curTop + (viewH / scale) / 2
-                };
-            }
+        if (minimapFocusAnchor) {
             offX = (cw / 2) - (minimapFocusAnchor.x - mapMinX) * zoom;
             offY = (ch / 2) - (minimapFocusAnchor.y - mapMinY) * zoom;
+        } else {
+            offX = (cw - mapW * zoom) / 2;
+            offY = (ch - mapH * zoom) / 2;
         }
 
         const toMapX = (x) => offX + (x - mapMinX) * zoom;
@@ -1200,60 +1182,91 @@
             const rect = canvas.getBoundingClientRect();
             moveWorkspaceToMapPos(e.clientX - rect.left, e.clientY - rect.top, snapToBlockTopLeft);
         };
+        let dragState = null;
         canvas.addEventListener("pointerdown", (e) => {
             if (e.button !== 0) return;
-            isDragging = true;
-            const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
             const data = canvas._mapData;
-            if (ws && data && minimapZoom > 1.001) {
+            const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+
+            let anchorX = minimapFocusAnchor ? minimapFocusAnchor.x : null;
+            let anchorY = minimapFocusAnchor ? minimapFocusAnchor.y : null;
+
+            if ((anchorX == null || anchorY == null) && data && ws) {
                 const scale = ws.scale || 1;
                 const curLeft = -(ws.scrollX || 0) / scale;
                 const curTop = -(ws.scrollY || 0) / scale;
-                minimapFocusAnchor = {
-                    x: curLeft + (data.viewW / scale) / 2,
-                    y: curTop + (data.viewH / scale) / 2
-                };
+                anchorX = curLeft + (data.viewW / scale) / 2;
+                anchorY = curTop + (data.viewH / scale) / 2;
             }
+
+            dragState = {
+                pointerId: e.pointerId,
+                startX: mx,
+                startY: my,
+                lastX: mx,
+                lastY: my,
+                startAnchorX: anchorX,
+                startAnchorY: anchorY,
+                hasPanned: false
+            };
             canvas.setPointerCapture(e.pointerId);
-            handlePointer(e, true);
         });
+
         canvas.addEventListener("pointermove", (e) => {
             const rect = canvas.getBoundingClientRect();
             const mx = e.clientX - rect.left;
             const my = e.clientY - rect.top;
 
-            if (isDragging) {
-                updateMinimapEdgeAutoScroll(mx, my);
-                handlePointer(e);
+            if (dragState && dragState.pointerId === e.pointerId) {
+                const totalDx = mx - dragState.startX;
+                const totalDy = my - dragState.startY;
+                if (!dragState.hasPanned && Math.hypot(totalDx, totalDy) > 4) {
+                    dragState.hasPanned = true;
+                }
+
+                if (dragState.hasPanned) {
+                    const data = canvas._mapData;
+                    if (data && dragState.startAnchorX != null && dragState.startAnchorY != null) {
+                        minimapFocusAnchor = {
+                            x: dragState.startAnchorX - totalDx / data.zoom,
+                            y: dragState.startAnchorY - totalDy / data.zoom
+                        };
+                        renderMinimap();
+                    }
+                    updateMinimapEdgeAutoScroll(mx, my);
+                }
             } else {
                 stopMinimapEdgeAutoScroll();
             }
+
             updateHoveredBlockInfo(mx, my);
         });
+
         canvas.addEventListener("pointerleave", () => {
             if (minimapInfoBar) {
                 minimapInfoBar.textContent = "---";
                 minimapInfoBar.style.color = "#7b8b98";
             }
         });
+
         const stopDrag = (e) => {
             stopMinimapEdgeAutoScroll();
-            if (isDragging && minimapZoom > 1.001) {
-                const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
-                const data = canvas._mapData;
-                if (ws && data) {
-                    const scale = ws.scale || 1;
-                    const curLeft = -(ws.scrollX || 0) / scale;
-                    const curTop = -(ws.scrollY || 0) / scale;
-                    minimapFocusAnchor = {
-                        x: curLeft + (data.viewW / scale) / 2,
-                        y: curTop + (data.viewH / scale) / 2
-                    };
+            if (dragState && dragState.pointerId === e.pointerId) {
+                const wasClick = !dragState.hasPanned;
+                const clickX = dragState.startX;
+                const clickY = dragState.startY;
+                dragState = null;
+                try { canvas.releasePointerCapture(e.pointerId); } catch (_) { }
+
+                if (wasClick) {
+                    moveWorkspaceToMapPos(clickX, clickY, true);
                 }
             }
-            isDragging = false;
-            try { canvas.releasePointerCapture(e.pointerId); } catch (_) { }
         };
+
         canvas.addEventListener("pointerup", stopDrag);
         canvas.addEventListener("pointercancel", stopDrag);
 
