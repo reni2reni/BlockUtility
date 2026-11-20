@@ -715,6 +715,27 @@
     let minimapAutoScrollId = null;
     let minimapEdgeDir = { x: 0, y: 0 };
 
+    function getRuleIndividualWidth(block, fallbackWidth) {
+        const name = getRuleBlockName(block) || "";
+        // ルール名の文字数（全角2・半角1換算）を基準に個別幅を算出
+        let weight = 0;
+        for (const ch of name) {
+            weight += ch.charCodeAt(0) > 0xff ? 2 : 1;
+        }
+
+        // 名前が空や短い場合でもブロックIDから少し変化をつけて個別化
+        const idStr = String((block && block.id) || "");
+        let hash = 0;
+        for (let i = 0; i < idStr.length; i++) {
+            hash = ((hash << 5) - hash + idStr.charCodeAt(i)) | 0;
+        }
+        const jitter = Math.abs(hash % 9) * 18; // 0 〜 144 の個別差
+
+        const base = fallbackWidth > 0 ? fallbackWidth : 120;
+        const nameWidth = weight * 11 + 40;
+        return Math.max(80, Math.min(900, Math.round((base * 0.4) + (nameWidth * 0.6) + jitter)));
+    }
+
     function getBlockMapBounds(block) {
         const xy = block && typeof block.getRelativeToSurfaceXY === "function"
             ? block.getRelativeToSurfaceXY()
@@ -724,29 +745,27 @@
         let height = 40;
 
         try {
-            if (block && typeof block.getBoundingRectangle === "function") {
-                const rect = block.getBoundingRectangle();
-                if (rect) {
-                    const rw = Number(rect.getWidth ? rect.getWidth() : rect.width);
-                    const rh = Number(rect.getHeight ? rect.getHeight() : rect.height);
-                    if (Number.isFinite(rw) && rw > 0) width = rw;
-                    if (Number.isFinite(rh) && rh > 0) height = rh;
-                    return { x: Number(xy.x) || 0, y: Number(xy.y) || 0, width, height };
-                }
+            const root = block && typeof block.getSvgRoot === "function" ? block.getSvgRoot() : null;
+            const pathEl = root && root.querySelector ? root.querySelector(":scope > path.blocklyPath") : null;
+            if (pathEl && typeof pathEl.getBBox === "function") {
+                const bbox = pathEl.getBBox();
+                if (bbox && bbox.width > 0) width = bbox.width;
+                if (bbox && bbox.height > 0) height = bbox.height;
             }
         } catch (_) { }
 
-        try {
-            if (block && typeof block.getHeightWidth === "function") {
+        if (width === 80 && block && typeof block.getHeightWidth === "function") {
+            try {
                 const hw = block.getHeightWidth();
-                if (hw) {
-                    const hwW = Number(hw.width);
-                    const hwH = Number(hw.height);
-                    if (Number.isFinite(hwW) && hwW > 0) width = hwW;
-                    if (Number.isFinite(hwH) && hwH > 0) height = hwH;
-                }
-            }
-        } catch (_) { }
+                if (hw && hw.width > 0) width = hw.width;
+                if (hw && hw.height > 0) height = hw.height;
+            } catch (_) { }
+        }
+
+        // MOD構造は無視し、ruleBlock は個別に横幅を変える
+        if (block && block.type === "ruleBlock") {
+            width = getRuleIndividualWidth(block, width);
+        }
 
         return { x: Number(xy.x) || 0, y: Number(xy.y) || 0, width, height };
     }
