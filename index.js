@@ -896,30 +896,46 @@
     function initMinimapButton() {
         if (minimapButton && document.body.contains(minimapButton)) return;
 
-        // 1. 左側のブロックリスト(Toolbox/Flyout)を除外し、メイン配置画面の右上にあるボタン群を抽出
-        const allButtons = Array.from(document.querySelectorAll('button, [role="button"], .btn'));
-        const rightTopButtons = allButtons.filter(el => {
+        // 1. ブロック置き場（メインキャンバスSVG）の枠の座標を取得
+        const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+        const svgRoot = (ws && typeof ws.getParentSvg === "function" && ws.getParentSvg()) || document.querySelector('.blocklySvg');
+        const svgRect = svgRoot ? svgRoot.getBoundingClientRect() : null;
+
+        const allButtons = Array.from(document.querySelectorAll('button, [role="button"], a, div[class*="button"]'));
+
+        // 2. ブロック置き場の枠内（右側かつ上端付近）にあるボタン群（検索・Exportなど）を特定
+        const insideWorkspaceButtons = allButtons.filter(el => {
             if (el.id === "bf6-minimap-toggle-btn") return false;
-            // ブロックリストパネル側の要素は完全に弾く
-            if (el.closest('.blocklyToolboxDiv, .blocklyFlyout, [class*="toolbox" i], [class*="flyout" i], [class*="drawer" i]')) {
-                return false;
-            }
+            // 左側のブロックリストは除外
+            if (el.closest('.blocklyToolboxDiv, .blocklyFlyout, [class*="toolbox" i], [class*="flyout" i]')) return false;
+
             const r = el.getBoundingClientRect();
-            // 画面の右半分 (left > 50%) かつ 上部 (top: 20px〜160px付近) にあるボタンに限定
-            return r.width > 0 && r.height > 0 && r.right > (window.innerWidth * 0.5) && r.top < 160 && r.top > 20;
+            if (r.width === 0 || r.height === 0) return false;
+
+            // テキストや属性に export や search が含まれているかをチェック
+            const text = (el.textContent + " " + (el.getAttribute("title") || "") + " " + (el.getAttribute("aria-label") || "")).toLowerCase();
+            const hasExportOrSearch = text.includes("export") || text.includes("search") || text.includes("エクスポート") || text.includes("検索");
+
+            if (svgRect) {
+                // ブロック置き場の上端付近（枠の上端〜80px以内）かつ 右側半分にあること
+                const isInsideTop = r.top >= (svgRect.top - 10) && r.top <= (svgRect.top + 80);
+                const isInsideRight = r.left >= (svgRect.left + svgRect.width * 0.4) && r.right <= (svgRect.right + 20);
+                return (isInsideTop && isInsideRight) || (hasExportOrSearch && r.top > 40);
+            }
+            return hasExportOrSearch && r.top > 40;
         });
 
         let targetContainer = null;
         let leftmostButton = null;
 
-        if (rightTopButtons.length > 0) {
-            // 右上のボタングループの中で「一番左側にあるボタン」を特定
-            rightTopButtons.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-            leftmostButton = rightTopButtons[0];
+        if (insideWorkspaceButtons.length > 0) {
+            // 右上アイコン群の中で一番左にあるボタンを特定
+            insideWorkspaceButtons.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+            leftmostButton = insideWorkspaceButtons[0];
             targetContainer = leftmostButton.parentElement;
         }
 
-        // 2. アイコンボタンの生成
+        // 3. アイコンボタンの生成
         const btn = document.createElement("button");
         btn.type = "button";
         btn.id = "bf6-minimap-toggle-btn";
@@ -937,13 +953,18 @@
             toggleMinimap();
         };
 
-        // 3. 挿入（右上アイコン群の中で最も左に差し込むことで、検索アイコン展開時も重ならない）
+        // 4. 右上アイコン群の左隣（検索が左に伸びても被らない位置）に挿入
         if (targetContainer && leftmostButton) {
             targetContainer.insertBefore(btn, leftmostButton);
-        } else {
-            // 要素が特定できない場合のフォールバック（エディット画面右上に配置）
+        } else if (svgRect) {
+            // フォールバック: ブロック置き場枠内の右上位置に直接オーバーレイ
             btn.style.position = "fixed";
-            btn.style.top = "65px";
+            btn.style.top = (svgRect.top + 12) + "px";
+            btn.style.right = (window.innerWidth - svgRect.right + 180) + "px";
+            document.body.appendChild(btn);
+        } else {
+            btn.style.position = "fixed";
+            btn.style.top = "100px";
             btn.style.right = "180px";
             document.body.appendChild(btn);
         }
