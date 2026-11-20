@@ -776,8 +776,8 @@
             baseWidth = fallbackWidth > 0 ? fallbackWidth : 120;
         }
 
-        const singleWidth = Math.max(40, Math.round(baseWidth));
-        return singleWidth; // 倍率1x
+        const singleWidth = Math.max(80, Math.min(1200, Math.round(baseWidth)));
+        return singleWidth ; // ルールブロック横幅を4倍
     }
 
     function getRuleMapBounds(block) {
