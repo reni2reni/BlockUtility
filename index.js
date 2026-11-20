@@ -5,6 +5,7 @@
     // BlockUtility: BF2042 Portal 用の独立ユーティリティプラグイン
     const plugin = BF2042Portal.Plugins.getPlugin("BlockUtility");
     let menusRegistered = false;
+    let wheelListenerAttached = false;
 
     function getPortalLanguage() {
         const candidates = [
@@ -303,8 +304,6 @@
         const root = block.getSvgRoot();
         if (!root) return;
 
-        // Blocklyのブロック自身のSVGへ枠線を付ける。
-        // 画面固定のDIVではないので、ズーム・パン・移動に追従する。
         const nodes = root.querySelectorAll
             ? root.querySelectorAll("path, rect, polygon, polyline, line")
             : [];
@@ -330,8 +329,6 @@
     function getBlockSearchSeed(block) {
         if (!block) return "";
 
-        // SubRoutine・変数・文字列など、ブロック上で右クリックした場合は
-        // そのブロックの入力テキストを検索欄へ自動投入する。
         const fields = [];
         try {
             if (Array.isArray(block.inputList)) {
@@ -373,9 +370,6 @@
     function prepareSearchTarget(block) {
         if (!block) return false;
 
-        // 検索ではBlocklyの通常選択を使わず、検索対象ブロック自身の
-        // SVG枠だけを表示する。これにより連結ブロックや子ブロックまで
-        // 一緒に選択されることを防ぐ。
         try {
             const ws = block.workspace || (_Blockly.getMainWorkspace && _Blockly.getMainWorkspace());
             for (const candidate of ws?.getAllBlocks?.(false) || []) {
@@ -418,10 +412,6 @@
 
     function isOuterSearchMatch(block, query) {
         if (!block || !query) return false;
-        // ブロックの中にさらに検索対象となる子ブロックがある場合、
-        // 外側のブロックは数えない。
-        // 例: 「変数」を表示する外側ブロックの中に
-        // 変数そのもののブロックが入っている場合は、内側だけを対象にする。
         for (const child of getSearchDescendants(block)) {
             if (searchTextForBlock(child).includes(query)) return true;
         }
@@ -639,6 +629,84 @@
         return getPortalLanguage() === "ja" ? "ブロック検索" : "Block Search";
     }
 
+    // ===== マウスホイールによるスクロール処理 =====
+    function handleWorkspaceWheel(event) {
+        const isShift = event.shiftKey;
+        const isCtrl = event.ctrlKey || event.metaKey;
+
+        // ShiftまたはCtrlが押されていない通常操作は既定（拡大縮小）のまま通す
+        if (!isShift && !isCtrl) return;
+
+        // 検索パネルや入力欄の上ではスクロール処理を行わない
+        if (event.target && typeof event.target.closest === "function") {
+            if (event.target.closest("#bf6-block-search-panel") || event.target.closest("input, textarea, select")) {
+                return;
+            }
+        }
+
+        const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+        if (!ws) return;
+
+        const injectionDiv = typeof ws.getInjectionDiv === "function" ? ws.getInjectionDiv() : null;
+        if (injectionDiv && !injectionDiv.contains(event.target)) {
+            return;
+        }
+
+        // デフォルトのズーム処理やブラウザ動作を停止
+        event.preventDefault();
+        event.stopPropagation();
+
+        // 移動量の算出
+        let delta = event.deltaY;
+        if (event.deltaMode === 1) delta *= 33;      // LINE単位
+        else if (event.deltaMode === 2) delta *= 100; // PAGE単位
+
+        let deltaX = 0;
+        let deltaY = 0;
+
+        if (isShift) {
+            // Shift + ホイール: 左右スクロール
+            const dx = event.deltaX !== 0 ? event.deltaX : delta;
+            deltaX = -dx;
+        } else if (isCtrl) {
+            // Ctrl + ホイール: 上下スクロール
+            deltaY = -delta;
+        }
+
+        const newX = (ws.scrollX || 0) + deltaX;
+        const newY = (ws.scrollY || 0) + deltaY;
+
+        if (typeof ws.scroll === "function") {
+            try {
+                ws.scroll(newX, newY);
+                return;
+            } catch (_) {}
+        }
+
+        if (typeof ws.translate === "function") {
+            ws.scrollX = newX;
+            ws.scrollY = newY;
+            ws.translate(newX, newY);
+        }
+
+        try {
+            if (ws.scrollbar) {
+                if (typeof ws.scrollbar.set === "function") {
+                    ws.scrollbar.set(newX, newY);
+                } else if (typeof ws.scrollbar.resize === "function") {
+                    ws.scrollbar.resize();
+                }
+            }
+        } catch (_) {}
+    }
+
+    function initScrollWheel() {
+        if (wheelListenerAttached) return;
+        // キャプチャフェーズで登録してBlocklyの既定ホイール処理より先に割り込む
+        window.addEventListener("wheel", handleWorkspaceWheel, { passive: false, capture: true });
+        wheelListenerAttached = true;
+    }
+
     function registerMenus() {
         if (menusRegistered) return;
         const Scope = _Blockly.ContextMenuRegistry.ScopeType;
@@ -673,9 +741,6 @@
         plugin.registerItem(sourceItem);
         _Blockly.ContextMenuRegistry.registry.register(sourceItem);
 
-        // Blocklyは右クリックした対象によって context menu の scope が変わるため、
-        // BLOCK と WORKSPACE の両方に同じ「ブロック検索」を登録する。
-        // BLOCK 側では、右クリックしたブロックのテキストをそのまま検索する。
         const blockSearchItem = {
             id: "blockUtilityBlockSearch",
             displayText: () => blockSearchText(),
@@ -689,7 +754,6 @@
         plugin.registerItem(blockSearchItem);
         _Blockly.ContextMenuRegistry.registry.register(blockSearchItem);
 
-        // ブロック以外のワークスペース上でも表示する。
         const workspaceBlockSearchItem = {
             id: "blockUtilityBlockSearchWorkspace",
             displayText: () => blockSearchText(),
@@ -721,10 +785,12 @@
     }
 
     plugin.initializeWorkspace = async function () {
-        try { registerMenus(); }
-        catch (e) {
+        try {
+            registerMenus();
+            initScrollWheel();
+        } catch (e) {
             if (BF2042Portal.Shared && typeof BF2042Portal.Shared.logError === "function") {
-                BF2042Portal.Shared.logError("BlockUtility menu registration", String(e));
+                BF2042Portal.Shared.logError("BlockUtility initialization", String(e));
             }
         }
     };
