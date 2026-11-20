@@ -753,7 +753,7 @@
             return;
         }
 
-        const edgeZone = 32;
+        const edgeZone = 40;
         const cw = minimapCanvas.width;
         const ch = minimapCanvas.height;
 
@@ -790,7 +790,7 @@
                     return;
                 }
 
-                const speed = 7.0;
+                const speed = 10.0;
                 const wsDeltaX = (minimapEdgeDir.x * speed) / data.zoom;
                 const wsDeltaY = (minimapEdgeDir.y * speed) / data.zoom;
 
