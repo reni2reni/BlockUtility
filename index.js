@@ -992,16 +992,57 @@
         }
     }
 
-    function moveWorkspaceToMapPos(mx, my) {
+    function findBlockAtWorkspacePos(ws, wsX, wsY) {
+        const allBlocks = ws && ws.getAllBlocks ? ws.getAllBlocks(false) : [];
+        let found = null;
+        let bestArea = Infinity;
+
+        for (const block of allBlocks) {
+            if (block.type !== "ruleBlock" && block.type !== "subroutineBlock") continue;
+            const xy = block.getRelativeToSurfaceXY ? block.getRelativeToSurfaceXY() : { x: 0, y: 0 };
+            const hw = block.getHeightWidth ? block.getHeightWidth() : { width: 80, height: 40 };
+            const left = xy.x;
+            const top = xy.y;
+            const right = xy.x + hw.width;
+            const bottom = xy.y + hw.height;
+
+            if (wsX >= left && wsX <= right && wsY >= top && wsY <= bottom) {
+                const area = Math.max(1, hw.width) * Math.max(1, hw.height);
+                if (area < bestArea) {
+                    bestArea = area;
+                    found = block;
+                }
+            }
+        }
+        return found;
+    }
+
+    function moveWorkspaceToMapPos(mx, my, snapToBlockTopLeft = false) {
         const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
         const data = minimapCanvas && minimapCanvas._mapData;
         if (!ws || !data) return;
 
-        const wsX = data.mapMinX + (mx - data.offX) / data.zoom;
-        const wsY = data.mapMinY + (my - data.offY) / data.zoom;
+        let wsX = data.mapMinX + (mx - data.offX) / data.zoom;
+        let wsY = data.mapMinY + (my - data.offY) / data.zoom;
 
-        const targetScrollX = -(wsX * data.scale) + (data.viewW / 2);
-        const targetScrollY = -(wsY * data.scale) + (data.viewH / 2);
+        let targetScrollX;
+        let targetScrollY;
+
+        if (snapToBlockTopLeft) {
+            const targetBlock = findBlockAtWorkspacePos(ws, wsX, wsY);
+            if (targetBlock && typeof targetBlock.getRelativeToSurfaceXY === "function") {
+                const xy = targetBlock.getRelativeToSurfaceXY();
+                // ビューポート枠の左上 (curLeft = -scrollX / scale) がブロック左上 (xy.x, xy.y) に重なる位置
+                targetScrollX = -(xy.x * data.scale);
+                targetScrollY = -(xy.y * data.scale);
+            } else {
+                targetScrollX = -(wsX * data.scale) + (data.viewW / 2);
+                targetScrollY = -(wsY * data.scale) + (data.viewH / 2);
+            }
+        } else {
+            targetScrollX = -(wsX * data.scale) + (data.viewW / 2);
+            targetScrollY = -(wsY * data.scale) + (data.viewH / 2);
+        }
 
         ws.scrollX = targetScrollX;
         ws.scrollY = targetScrollY;
@@ -1155,9 +1196,9 @@
         canvas.style.cssText = "background:#12161c;cursor:crosshair;display:block;width:518px;height:360px;";
 
         let isDragging = false;
-        const handlePointer = (e) => {
+        const handlePointer = (e, snapToBlockTopLeft = false) => {
             const rect = canvas.getBoundingClientRect();
-            moveWorkspaceToMapPos(e.clientX - rect.left, e.clientY - rect.top);
+            moveWorkspaceToMapPos(e.clientX - rect.left, e.clientY - rect.top, snapToBlockTopLeft);
         };
         canvas.addEventListener("pointerdown", (e) => {
             if (e.button !== 0) return;
@@ -1174,7 +1215,7 @@
                 };
             }
             canvas.setPointerCapture(e.pointerId);
-            handlePointer(e);
+            handlePointer(e, true);
         });
         canvas.addEventListener("pointermove", (e) => {
             const rect = canvas.getBoundingClientRect();
