@@ -824,26 +824,27 @@
         const panel = document.createElement("div");
         panel.id = "bf6-minimap-panel";
         panel.style.cssText = [
-            "position:fixed", "z-index:2147483640", "top:70px", "right:20px",
-            "width:260px", "background:rgba(20,26,34,.95)", "border:1px solid #667381",
-            "border-radius:6px", "box-shadow:0 6px 22px rgba(0,0,0,.5)", "display:none",
+            "position:fixed", "z-index:2147483640", "top:60px", "right:20px",
+            "width:520px", "background:rgba(20,26,34,.96)", "border:1px solid #667381",
+            "border-radius:6px", "box-shadow:0 8px 30px rgba(0,0,0,.6)", "display:none",
             "flex-direction:column", "user-select:none", "overflow:hidden"
         ].join(";");
 
         const header = document.createElement("div");
-        header.style.cssText = "height:26px;background:#2b3440;display:flex;align-items:center;padding:0 8px;font-size:12px;font-weight:bold;color:#fff;";
+        header.style.cssText = "height:28px;background:#2b3440;display:flex;align-items:center;padding:0 10px;font-size:13px;font-weight:bold;color:#fff;";
         header.textContent = ja ? "全体マップ (移動)" : "Minimap (Navigate)";
 
         const closeBtn = document.createElement("button");
         closeBtn.textContent = "✕";
-        closeBtn.style.cssText = "margin-left:auto;background:transparent;border:0;color:#aaa;cursor:pointer;font-size:14px;";
+        closeBtn.style.cssText = "margin-left:auto;background:transparent;border:0;color:#aaa;cursor:pointer;font-size:16px;line-height:28px;padding:0 4px;";
         closeBtn.onclick = () => toggleMinimap(false);
         header.appendChild(closeBtn);
 
+        // 描画キャンバス（幅・高さを2倍に設定）
         const canvas = document.createElement("canvas");
-        canvas.width = 258;
-        canvas.height = 180;
-        canvas.style.cssText = "background:#12161c;cursor:crosshair;display:block;";
+        canvas.width = 518;
+        canvas.height = 360;
+        canvas.style.cssText = "background:#12161c;cursor:crosshair;display:block;width:518px;height:360px;";
 
         let isDragging = false;
         const handlePointer = (e) => {
@@ -895,19 +896,33 @@
     function initMinimapButton() {
         if (minimapButton && document.body.contains(minimapButton)) return;
 
-        // 検索や保存アイコン等が含まれるコンテナを検索
-        const searchOrSave = document.querySelector('button[aria-label*="Search"], button[aria-label*="検索"], button[aria-label*="Save"], button[aria-label*="保存"], input[placeholder*="Search"], input[placeholder*="検索"]');
-        const container = (searchOrSave && searchOrSave.closest(".btn-group, [class*='header'], [class*='toolbar'], [class*='actions']"))
-            || (searchOrSave && searchOrSave.parentElement);
+        const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+        const injectionDiv = ws && typeof ws.getInjectionDiv === "function" ? ws.getInjectionDiv() : null;
+
+        // エディットフィールド内の右上にあるアイコン/検索要素を特定
+        let targetParent = null;
+        if (injectionDiv) {
+            // エディタ内のボタンや入力フィールドを検索
+            const inEditorElements = injectionDiv.querySelectorAll('button, input, [role="button"]');
+            for (const el of inEditorElements) {
+                // ズームボタン(+/-)以外の右上コントロール群(検索など)の親コンテナを探す
+                const parent = el.parentElement;
+                if (parent && parent !== injectionDiv) {
+                    targetParent = parent;
+                    break;
+                }
+            }
+            // 見つからない場合はエディタ右上に絶対配置
+            if (!targetParent) targetParent = injectionDiv;
+        }
 
         const btn = document.createElement("button");
         btn.type = "button";
         btn.id = "bf6-minimap-toggle-btn";
         btn.title = getPortalLanguage() === "ja" ? "全体マップ表示/移動" : "Toggle Minimap";
-        // ミニマップ・ナビアイコン（コンパス・マップ風SVG）
         btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"></polygon><line x1="9" y1="3" x2="9" y2="18"></line><line x1="15" y1="6" x2="15" y2="21"></line></svg>`;
         btn.style.cssText = [
-            "height:32px", "width:36px", "padding:0", "margin:0 4px", "display:inline-flex",
+            "height:30px", "width:32px", "padding:0", "margin:0 4px", "display:inline-flex",
             "align-items:center", "justify-content:center", "background:#20262d",
             "border:1px solid #667381", "border-radius:4px", "color:#fff",
             "cursor:pointer", "flex-shrink:0", "z-index:100"
@@ -918,16 +933,22 @@
             toggleMinimap();
         };
 
-        if (container) {
-            // 既存のボタングループの先頭（左側）に挿入することで検索バー展開時の重なりを回避
-            container.insertBefore(btn, container.firstChild);
+        if (targetParent && targetParent !== injectionDiv) {
+            // 検索バー展開時(左へ伸びる)にも重ならないよう、アイコン群の先頭(左側)に挿入
+            targetParent.insertBefore(btn, targetParent.firstChild);
+        } else if (injectionDiv) {
+            // 親コンテナが検出できなかった場合：エディット画面内の右上にオーバーレイ固定
+            btn.style.position = "absolute";
+            btn.style.top = "12px";
+            btn.style.right = "110px"; // 検索バーが伸びるスペースを考慮
+            injectionDiv.appendChild(btn);
         } else {
-            // 親が特定できない場合のフォールバック固定配置
             btn.style.position = "fixed";
-            btn.style.top = "18px";
-            btn.style.right = "320px";
+            btn.style.top = "70px";
+            btn.style.right = "110px";
             document.body.appendChild(btn);
         }
+
         minimapButton = btn;
     }
 
