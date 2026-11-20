@@ -965,7 +965,7 @@
         };
         header.appendChild(closeBtn);
 
-        header.addEventListener("dblclick", (e) => {
+        header.addEventListener("click", (e) => {
             e.stopPropagation();
             toggleMinimapCollapse();
         });
@@ -1037,46 +1037,7 @@
         }
     }
 
-    // 右上ツールバーへのアイコン配置（検索バーの幅伸縮を考慮し、Flex親要素の先頭に挿入）
-    function initMinimapButton() {
-        if (minimapButton && document.body.contains(minimapButton)) return;
-
-        // 1. アイコンボタンの生成
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.id = "bf6-minimap-toggle-btn";
-        btn.title = getPortalLanguage() === "ja" ? "全体マップ表示/移動" : "Toggle Minimap";
-        btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"></polygon><line x1="9" y1="3" x2="9" y2="18"></line><line x1="15" y1="6" x2="15" y2="21"></line></svg>`;
-        btn.style.cssText = [
-            "position:fixed", "z-index:100", "height:30px", "width:32px", "padding:0",
-            "display:inline-flex", "align-items:center", "justify-content:center",
-            "background:#20262d", "border:1px solid #667381", "border-radius:4px",
-            "color:#fff", "cursor:pointer", "box-shadow:0 2px 6px rgba(0,0,0,.35)"
-        ].join(";");
-
-        btn.onclick = (e) => {
-            e.stopPropagation();
-            toggleMinimap();
-        };
-
-        // 2. ブロック置き場（キャンバス）の枠を基準に、高さはそのまま「左端」へ配置
-        const updatePosition = () => {
-            const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
-            const svgRoot = (ws && typeof ws.getParentSvg === "function" && ws.getParentSvg()) || document.querySelector('.blocklySvg');
-            if (!svgRoot) return;
-            const svgRect = svgRoot.getBoundingClientRect();
-            // 高さ: 右上アイコン群と同じ(枠の上端+12px) / 横位置: ブロックリストパネルの右隣(枠の左端+16px)
-            btn.style.top = (svgRect.top + 12) + "px";
-            btn.style.left = (svgRect.left + 16) + "px";
-        };
-
-        document.body.appendChild(btn);
-        minimapButton = btn;
-
-        // 初期配置＆画面リサイズ時の自動追従
-        updatePosition();
-        window.addEventListener("resize", updatePosition);
-    }
+    
 
     function initScrollWheel() {
         if (wheelListenerAttached) return;
