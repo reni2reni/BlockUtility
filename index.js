@@ -877,15 +877,19 @@
         let dx = 0;
         let dy = 0;
         if (mx >= 0 && mx < edgeZone) {
-            dx = -((edgeZone - mx) / edgeZone);
+            const ratio = (edgeZone - mx) / edgeZone; // 0〜1
+            dx = -(ratio * ratio); // 端に近づくほど加速（2乗カーブ）
         } else if (mx > cw - edgeZone && mx <= cw) {
-            dx = (mx - (cw - edgeZone)) / edgeZone;
+            const ratio = (mx - (cw - edgeZone)) / edgeZone; // 0〜1
+            dx = ratio * ratio;
         }
 
         if (my >= 0 && my < edgeZone) {
-            dy = -((edgeZone - my) / edgeZone);
+            const ratio = (edgeZone - my) / edgeZone; // 0〜1
+            dy = -(ratio * ratio);
         } else if (my > ch - edgeZone && my <= ch) {
-            dy = (my - (ch - edgeZone)) / edgeZone;
+            const ratio = (my - (ch - edgeZone)) / edgeZone; // 0〜1
+            dy = ratio * ratio;
         }
 
         minimapEdgeDir.x = dx;
@@ -903,7 +907,7 @@
                     return;
                 }
 
-                const speed = 3.5; // 急な移動を防ぐ緩やかな速度（px/frame）
+                const speed = 7.0; // 端ギリギリで以前の約2倍（px/frame）
                 const wsDeltaX = (minimapEdgeDir.x * speed) / data.zoom;
                 const wsDeltaY = (minimapEdgeDir.y * speed) / data.zoom;
 
