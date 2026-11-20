@@ -712,6 +712,8 @@
     let minimapAnimId = null;
     let minimapDragState = null;
     let minimapFocusAnchor = null;
+    let minimapAutoScrollId = null;
+    let minimapEdgeDir = { x: 0, y: 0 };
 
     const minimapZoomLevels = [1, 2, 4];
     let minimapZoomIndex = 0; // 0: 1x, 1: 2x, 2: 4x
@@ -857,6 +859,87 @@
         ctx.strokeStyle = "#55dfff";
         ctx.lineWidth = 2;
         ctx.strokeRect(vx, vy, vw, vh);
+    }
+
+    function updateMinimapEdgeAutoScroll(mx, my) {
+        if (!minimapCanvas) return;
+        const mult = minimapZoomLevels[minimapZoomIndex];
+        if (mult === 1) {
+            minimapEdgeDir.x = 0;
+            minimapEdgeDir.y = 0;
+            return;
+        }
+
+        const edgeZone = 32;
+        const cw = minimapCanvas.width;
+        const ch = minimapCanvas.height;
+
+        let dx = 0;
+        let dy = 0;
+        if (mx >= 0 && mx < edgeZone) {
+            dx = -((edgeZone - mx) / edgeZone);
+        } else if (mx > cw - edgeZone && mx <= cw) {
+            dx = (mx - (cw - edgeZone)) / edgeZone;
+        }
+
+        if (my >= 0 && my < edgeZone) {
+            dy = -((edgeZone - my) / edgeZone);
+        } else if (my > ch - edgeZone && my <= ch) {
+            dy = (my - (ch - edgeZone)) / edgeZone;
+        }
+
+        minimapEdgeDir.x = dx;
+        minimapEdgeDir.y = dy;
+
+        if ((dx !== 0 || dy !== 0) && !minimapAutoScrollId) {
+            const step = () => {
+                if (!minimapIsOpen || minimapIsCollapsed || !minimapFocusAnchor) {
+                    stopMinimapEdgeAutoScroll();
+                    return;
+                }
+                const data = minimapCanvas && minimapCanvas._mapData;
+                if (!data || (!minimapEdgeDir.x && !minimapEdgeDir.y)) {
+                    stopMinimapEdgeAutoScroll();
+                    return;
+                }
+
+                const speed = 3.5; // 急な移動を防ぐ緩やかな速度（px/frame）
+                const wsDeltaX = (minimapEdgeDir.x * speed) / data.zoom;
+                const wsDeltaY = (minimapEdgeDir.y * speed) / data.zoom;
+
+                minimapFocusAnchor.x += wsDeltaX;
+                minimapFocusAnchor.y += wsDeltaY;
+
+                const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+                if (ws) {
+                    const targetScrollX = -(minimapFocusAnchor.x * data.scale) + (data.viewW / 2);
+                    const targetScrollY = -(minimapFocusAnchor.y * data.scale) + (data.viewH / 2);
+                    ws.scrollX = targetScrollX;
+                    ws.scrollY = targetScrollY;
+                    if (typeof ws.translate === "function") {
+                        ws.translate(targetScrollX, targetScrollY);
+                    }
+                    if (typeof ws.scroll === "function") {
+                        try { ws.scroll(targetScrollX, targetScrollY); } catch (_) { }
+                    }
+                }
+
+                renderMinimap();
+                minimapAutoScrollId = requestAnimationFrame(step);
+            };
+            minimapAutoScrollId = requestAnimationFrame(step);
+        } else if (dx === 0 && dy === 0) {
+            stopMinimapEdgeAutoScroll();
+        }
+    }
+
+    function stopMinimapEdgeAutoScroll() {
+        if (minimapAutoScrollId) {
+            cancelAnimationFrame(minimapAutoScrollId);
+            minimapAutoScrollId = null;
+        }
+        minimapEdgeDir.x = 0;
+        minimapEdgeDir.y = 0;
     }
 
     // マウスホバー位置のブロック名を取得して情報枠へ表示
@@ -1014,6 +1097,7 @@
     }
 
     function stopMinimapLoop() {
+        stopMinimapEdgeAutoScroll();
         if (minimapAnimId) {
             cancelAnimationFrame(minimapAnimId);
             minimapAnimId = null;
@@ -1122,7 +1206,10 @@
             const my = e.clientY - rect.top;
 
             if (isDragging) {
+                updateMinimapEdgeAutoScroll(mx, my);
                 handlePointer(e);
+            } else {
+                stopMinimapEdgeAutoScroll();
             }
             // ホバー時のブロック名更新
             updateHoveredBlockInfo(mx, my);
@@ -1134,6 +1221,7 @@
             }
         });
         const stopDrag = (e) => {
+            stopMinimapEdgeAutoScroll();
             if (isDragging && minimapZoomLevels[minimapZoomIndex] !== 1) {
                 const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
                 const data = canvas._mapData;
