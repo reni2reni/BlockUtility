@@ -868,7 +868,7 @@
         const allBlocks = ws.getAllBlocks ? ws.getAllBlocks(false) : [];
         let found = null;
 
-        // ルールブロックとサブルーチンを判定
+        // カーソル下のブロックを正確に1つずつ検出
         for (const block of allBlocks) {
             if (block.type !== "ruleBlock" && block.type !== "subroutineBlock") continue;
             const xy = block.getRelativeToSurfaceXY ? block.getRelativeToSurfaceXY() : { x: 0, y: 0 };
@@ -1066,9 +1066,9 @@
         // ★ タイトル下のブロック名表示枠
         const infoBar = document.createElement("div");
         infoBar.style.cssText = [
-            "height:22px", "background:#171d24", "border-top:1px solid #333d4b",
+            "height:44px", "background:#171d24", "border-top:1px solid #333d4b",
             "border-bottom:1px solid #333d4b", "display:flex", "align-items:center",
-            "padding:0 10px", "font-size:11px", "font-weight:bold", "color:#7b8b98",
+            "padding:0 10px", "font-size:22px", "font-weight:bold", "color:#7b8b98",
             "white-space:nowrap", "overflow:hidden", "text-overflow:ellipsis"
         ].join(";");
         infoBar.textContent = "---";
