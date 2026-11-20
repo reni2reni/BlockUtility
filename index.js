@@ -732,7 +732,7 @@
         const base = fallbackWidth > 0 ? fallbackWidth : 120;
         const nameWidth = weight * 11 + 40;
         const singleWidth = Math.max(80, Math.min(900, Math.round((base * 0.4) + (nameWidth * 0.6) + jitter)));
-        return singleWidth * 4; // ルールブロック横幅を4倍
+        return singleWidth * 6; // ルールブロック横幅を4倍
     }
 
     function getRuleMapBounds(block) {
