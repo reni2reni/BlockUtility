@@ -715,24 +715,70 @@
     let minimapAutoScrollId = null;
     let minimapEdgeDir = { x: 0, y: 0 };
 
+    function getRuleChildWidths(block) {
+        const widths = [];
+        if (!block) return widths;
+
+        const addBlockWidth = (child) => {
+            if (!child || child === block) return;
+            let w = 0;
+            try {
+                const root = typeof child.getSvgRoot === "function" ? child.getSvgRoot() : null;
+                const pathEl = root && root.querySelector ? root.querySelector(":scope > path.blocklyPath") : null;
+                if (pathEl && typeof pathEl.getBBox === "function") {
+                    const bbox = pathEl.getBBox();
+                    if (bbox && Number.isFinite(bbox.width) && bbox.width > 0) {
+                        w = bbox.width;
+                    }
+                }
+            } catch (_) { }
+
+            if (!w && typeof child.getHeightWidth === "function") {
+                try {
+                    const hw = child.getHeightWidth();
+                    if (hw && Number.isFinite(hw.width) && hw.width > 0) {
+                        w = hw.width;
+                    }
+                } catch (_) { }
+            }
+
+            if (w > 0) widths.push(w);
+        };
+
+        try {
+            if (typeof block.getDescendants === "function") {
+                for (const desc of block.getDescendants(false) || []) {
+                    addBlockWidth(desc);
+                }
+                return widths;
+            }
+        } catch (_) { }
+
+        const walk = (current) => {
+            if (!current || typeof current.getChildren !== "function") return;
+            for (const child of current.getChildren(false) || []) {
+                if (!child) continue;
+                addBlockWidth(child);
+                walk(child);
+            }
+        };
+        walk(block);
+        return widths;
+    }
+
     function getRuleIndividualWidth(block, fallbackWidth) {
-        const name = getRuleBlockName(block) || "";
-        let weight = 0;
-        for (const ch of name) {
-            weight += ch.charCodeAt(0) > 0xff ? 2 : 1;
+        const childWidths = getRuleChildWidths(block);
+        let baseWidth;
+
+        if (childWidths.length > 0) {
+            const sum = childWidths.reduce((acc, w) => acc + w, 0);
+            baseWidth = sum / childWidths.length; // 子ブロック横幅の平均
+        } else {
+            baseWidth = fallbackWidth > 0 ? fallbackWidth : 120;
         }
 
-        const idStr = String((block && block.id) || "");
-        let hash = 0;
-        for (let i = 0; i < idStr.length; i++) {
-            hash = ((hash << 5) - hash + idStr.charCodeAt(i)) | 0;
-        }
-        const jitter = Math.abs(hash % 9) * 18;
-
-        const base = fallbackWidth > 0 ? fallbackWidth : 120;
-        const nameWidth = weight * 11 + 40;
-        const singleWidth = Math.max(80, Math.min(900, Math.round((base * 0.4) + (nameWidth * 0.6) + jitter)));
-        return singleWidth * 6; // ルールブロック横幅を4倍
+        const singleWidth = Math.max(80, Math.min(1200, Math.round(baseWidth)));
+        return singleWidth * 4; // ルールブロック横幅を4倍
     }
 
     function getRuleMapBounds(block) {
