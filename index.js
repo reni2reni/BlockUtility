@@ -1221,7 +1221,7 @@
         });
         const stopDrag = (e) => {
             stopMinimapEdgeAutoScroll();
-            if (isDragging && minimapZoomLevels[minimapZoomIndex] !== 1) {
+            if (isDragging && minimapZoom > 1.001) {
                 const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
                 const data = canvas._mapData;
                 if (ws && data) {
