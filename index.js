@@ -873,13 +873,27 @@
             minimapDragState = {
                 pointerId: event.pointerId,
                 offsetX: event.clientX - rect.left,
-                offsetY: event.clientY - rect.top
+                offsetY: event.clientY - rect.top,
+                startX: event.clientX,
+                startY: event.clientY,
+                hasMoved: false
             };
             handle.setPointerCapture(event.pointerId);
             event.preventDefault();
         });
+
         handle.addEventListener("pointermove", event => {
             if (!minimapDragState || minimapDragState.pointerId !== event.pointerId) return;
+
+            // わずかなブレ（4px以内）はクリックとみなすため、4px超の移動でドラッグ判定
+            const dx = Math.abs(event.clientX - minimapDragState.startX);
+            const dy = Math.abs(event.clientY - minimapDragState.startY);
+            if (dx > 4 || dy > 4) {
+                minimapDragState.hasMoved = true;
+            }
+
+            if (!minimapDragState.hasMoved) return;
+
             const left = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth,
                 event.clientX - minimapDragState.offsetX));
             const top = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight,
@@ -888,14 +902,23 @@
             panel.style.top = top + "px";
             panel.style.right = "auto";
         });
+
         const endDrag = event => {
             if (!minimapDragState || minimapDragState.pointerId !== event.pointerId) return;
+            const hasMoved = minimapDragState.hasMoved;
             minimapDragState = null;
             try { handle.releasePointerCapture(event.pointerId); } catch (_) { }
+
+            // ★ ドラッグ移動していなかった場合のみ「クリック」と判定して開閉する
+            if (!hasMoved) {
+                toggleMinimapCollapse();
+            }
         };
+
         handle.addEventListener("pointerup", endDrag);
         handle.addEventListener("pointercancel", endDrag);
     }
+
 
     function toggleMinimapCollapse() {
         if (!minimapPanel || !minimapCanvas) return;
@@ -948,7 +971,7 @@
             "padding:0 10px", "font-size:13px", "font-weight:bold", "color:#fff",
             "cursor:move"
         ].join(";");
-        header.title = ja ? "ドラッグで移動 / ダブルクリックで折りたたみ" : "Drag to move / Double-click to collapse";
+        header.title = ja ? "ドラッグで移動 / クリックで折りたたみ・展開" : "Drag to move / Click to collapse or expand";
 
         const titleText = document.createElement("span");
         titleText.textContent = ja ? "全体マップ (移動)" : "Navigate with Minimap";
@@ -957,21 +980,15 @@
 
         const closeBtn = document.createElement("button");
         closeBtn.textContent = "✕";
-        closeBtn.title = ja ? "閉じる" : "Close";
+        closeBtn.title = ja ? "完全に閉じる" : "Close";
         closeBtn.style.cssText = "margin-left:auto;background:transparent;border:0;color:#aaa;cursor:pointer;font-size:16px;line-height:28px;padding:0 4px;";
-
-        header.addEventListener("click", (e) => {
-            e.stopPropagation();
-            toggleMinimapCollapse();
-        });
-        
         closeBtn.onclick = (e) => {
             e.stopPropagation();
             toggleMinimap(false);
         };
         header.appendChild(closeBtn);
 
-
+        // タイトルバーのドラッグ＆クリック判定を適用（ダブルクリックイベントは廃止）
         makeMinimapPanelDraggable(panel, header);
 
         const canvas = document.createElement("canvas");
