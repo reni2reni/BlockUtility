@@ -896,26 +896,30 @@
     function initMinimapButton() {
         if (minimapButton && document.body.contains(minimapButton)) return;
 
-        const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
-        const injectionDiv = ws && typeof ws.getInjectionDiv === "function" ? ws.getInjectionDiv() : null;
-
-        // エディットフィールド内の右上にあるアイコン/検索要素を特定
-        let targetParent = null;
-        if (injectionDiv) {
-            // エディタ内のボタンや入力フィールドを検索
-            const inEditorElements = injectionDiv.querySelectorAll('button, input, [role="button"]');
-            for (const el of inEditorElements) {
-                // ズームボタン(+/-)以外の右上コントロール群(検索など)の親コンテナを探す
-                const parent = el.parentElement;
-                if (parent && parent !== injectionDiv) {
-                    targetParent = parent;
-                    break;
-                }
+        // 1. 左側のブロックリスト(Toolbox/Flyout)を除外し、メイン配置画面の右上にあるボタン群を抽出
+        const allButtons = Array.from(document.querySelectorAll('button, [role="button"], .btn'));
+        const rightTopButtons = allButtons.filter(el => {
+            if (el.id === "bf6-minimap-toggle-btn") return false;
+            // ブロックリストパネル側の要素は完全に弾く
+            if (el.closest('.blocklyToolboxDiv, .blocklyFlyout, [class*="toolbox" i], [class*="flyout" i], [class*="drawer" i]')) {
+                return false;
             }
-            // 見つからない場合はエディタ右上に絶対配置
-            if (!targetParent) targetParent = injectionDiv;
+            const r = el.getBoundingClientRect();
+            // 画面の右半分 (left > 50%) かつ 上部 (top: 20px〜160px付近) にあるボタンに限定
+            return r.width > 0 && r.height > 0 && r.right > (window.innerWidth * 0.5) && r.top < 160 && r.top > 20;
+        });
+
+        let targetContainer = null;
+        let leftmostButton = null;
+
+        if (rightTopButtons.length > 0) {
+            // 右上のボタングループの中で「一番左側にあるボタン」を特定
+            rightTopButtons.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+            leftmostButton = rightTopButtons[0];
+            targetContainer = leftmostButton.parentElement;
         }
 
+        // 2. アイコンボタンの生成
         const btn = document.createElement("button");
         btn.type = "button";
         btn.id = "bf6-minimap-toggle-btn";
@@ -933,19 +937,14 @@
             toggleMinimap();
         };
 
-        if (targetParent && targetParent !== injectionDiv) {
-            // 検索バー展開時(左へ伸びる)にも重ならないよう、アイコン群の先頭(左側)に挿入
-            targetParent.insertBefore(btn, targetParent.firstChild);
-        } else if (injectionDiv) {
-            // 親コンテナが検出できなかった場合：エディット画面内の右上にオーバーレイ固定
-            btn.style.position = "absolute";
-            btn.style.top = "12px";
-            btn.style.right = "110px"; // 検索バーが伸びるスペースを考慮
-            injectionDiv.appendChild(btn);
+        // 3. 挿入（右上アイコン群の中で最も左に差し込むことで、検索アイコン展開時も重ならない）
+        if (targetContainer && leftmostButton) {
+            targetContainer.insertBefore(btn, leftmostButton);
         } else {
+            // 要素が特定できない場合のフォールバック（エディット画面右上に配置）
             btn.style.position = "fixed";
-            btn.style.top = "70px";
-            btn.style.right = "110px";
+            btn.style.top = "65px";
+            btn.style.right = "180px";
             document.body.appendChild(btn);
         }
 
