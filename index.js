@@ -6,6 +6,12 @@
     const plugin = BF2042Portal.Plugins.getPlugin("BlockUtility");
     let menusRegistered = false;
     let wheelListenerAttached = false;
+    // ===== ミニマップ関連変数 =====
+    let minimapButton = null;
+    let minimapPanel = null;
+    let minimapCanvas = null;
+    let minimapIsOpen = false;
+    let minimapAnimId = null;
 
     function getPortalLanguage() {
         const candidates = [
@@ -22,7 +28,7 @@
             const field = typeof block.getField === "function" ? block.getField("SUBROUTINE_NAME") : null;
             const value = field && typeof field.getValue === "function" ? field.getValue() : null;
             if (value != null && String(value).trim() !== "") return String(value);
-        } catch (_) {}
+        } catch (_) { }
         const extraName = block.extraState && block.extraState.subroutineName;
         return extraName != null && String(extraName).trim() !== "" ? String(extraName) : null;
     }
@@ -33,7 +39,7 @@
             const field = typeof block.getField === "function" ? block.getField("SUBROUTINE_NAME") : null;
             const value = field && typeof field.getValue === "function" ? field.getValue() : null;
             if (value != null && String(value).trim() !== "") return String(value);
-        } catch (_) {}
+        } catch (_) { }
         const extraName = block.extraState && block.extraState.subroutineName;
         return extraName != null && String(extraName).trim() !== "" ? String(extraName) : null;
     }
@@ -47,7 +53,7 @@
                 ws.centerOnBlock(block.id);
                 return true;
             }
-        } catch (_) {}
+        } catch (_) { }
         return false;
     }
 
@@ -81,7 +87,7 @@
                     width = Number(rect.getWidth ? rect.getWidth() : rect.width) || 0;
                     height = Number(rect.getHeight ? rect.getHeight() : rect.height) || 0;
                 }
-            } catch (_) {}
+            } catch (_) { }
             return { x: Number(pos.x) + width / 2, y: Number(pos.y) + height / 2 };
         } catch (_) {
             return null;
@@ -179,7 +185,7 @@
                         ? parent.getSurroundParent() : null;
                 }
             }
-        } catch (_) {}
+        } catch (_) { }
         return null;
     }
 
@@ -199,7 +205,7 @@
                 field.setValue(name);
                 return true;
             }
-        } catch (_) {}
+        } catch (_) { }
         return false;
     }
 
@@ -221,7 +227,7 @@
                 };
                 for (const child of modBlock.getChildren(false)) walk(child);
             }
-        } catch (_) {}
+        } catch (_) { }
 
         return getBlocksInVisualOrder(blocks);
     }
@@ -264,7 +270,7 @@
         try {
             if (block.type) parts.push(String(block.type));
             if (typeof block.toString === "function") parts.push(String(block.toString()));
-        } catch (_) {}
+        } catch (_) { }
         try {
             if (Array.isArray(block.inputList)) {
                 for (const input of block.inputList) {
@@ -274,11 +280,11 @@
                         try {
                             if (typeof field.getText === "function") parts.push(String(field.getText() || ""));
                             else if (typeof field.getValue === "function") parts.push(String(field.getValue() || ""));
-                        } catch (_) {}
+                        } catch (_) { }
                     }
                 }
             }
-        } catch (_) {}
+        } catch (_) { }
         return parts.join(" ").toLowerCase();
     }
 
@@ -292,7 +298,7 @@
                     item.node.style.vectorEffect = item.vectorEffect;
                     item.node.style.filter = item.filter;
                 }
-            } catch (_) {}
+            } catch (_) { }
         }
         blockSearchHighlightStyles = [];
         blockSearchHighlight = null;
@@ -340,14 +346,14 @@
                         try {
                             if (typeof field.getText === "function") text = String(field.getText() || "").trim();
                             if (!text && typeof field.getValue === "function") text = String(field.getValue() || "").trim();
-                        } catch (_) {}
+                        } catch (_) { }
                         if (!text) continue;
                         const name = String(field.name || "").toUpperCase();
                         fields.push({ field, name, text });
                     }
                 }
             }
-        } catch (_) {}
+        } catch (_) { }
 
         const preferred = fields.find(item =>
             /SUBROUTINE|VARIABLE|VAR|TEXT|STRING|NAME/.test(item.name)
@@ -375,9 +381,9 @@
             for (const candidate of ws?.getAllBlocks?.(false) || []) {
                 try {
                     if (typeof candidate.unselect === "function") candidate.unselect();
-                } catch (_) {}
+                } catch (_) { }
             }
-        } catch (_) {}
+        } catch (_) { }
 
         removeBlockSearchHighlight();
         centerOnBlock(block);
@@ -395,7 +401,7 @@
                 }
                 return descendants;
             }
-        } catch (_) {}
+        } catch (_) { }
         try {
             const walk = current => {
                 if (!current || typeof current.getChildren !== "function") return;
@@ -406,7 +412,7 @@
                 }
             };
             walk(block);
-        } catch (_) {}
+        } catch (_) { }
         return descendants;
     }
 
@@ -492,7 +498,7 @@
         const endDrag = event => {
             if (!blockSearchDragState || blockSearchDragState.pointerId !== event.pointerId) return;
             blockSearchDragState = null;
-            try { handle.releasePointerCapture(event.pointerId); } catch (_) {}
+            try { handle.releasePointerCapture(event.pointerId); } catch (_) { }
         };
         handle.addEventListener("pointerup", endDrag);
         handle.addEventListener("pointercancel", endDrag);
@@ -680,7 +686,7 @@
             try {
                 ws.scroll(newX, newY);
                 return;
-            } catch (_) {}
+            } catch (_) { }
         }
 
         if (typeof ws.translate === "function") {
@@ -697,7 +703,232 @@
                     ws.scrollbar.resize();
                 }
             }
-        } catch (_) {}
+        } catch (_) { }
+    }
+
+    // ===== 全体縮小ミニマップ =====
+    function getWorkspaceBounds(ws) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        const blocks = ws.getTopBlocks ? ws.getTopBlocks(false) : [];
+        if (!blocks.length) {
+            return { minX: 0, minY: 0, maxX: 1000, maxY: 1000, width: 1000, height: 1000 };
+        }
+        for (const block of blocks) {
+            const xy = block.getRelativeToSurfaceXY ? block.getRelativeToSurfaceXY() : { x: 0, y: 0 };
+            const hw = block.getHeightWidth ? block.getHeightWidth() : { width: 100, height: 50 };
+            minX = Math.min(minX, xy.x);
+            minY = Math.min(minY, xy.y);
+            maxX = Math.max(maxX, xy.x + hw.width);
+            maxY = Math.max(maxY, xy.y + hw.height);
+        }
+        return {
+            minX, minY, maxX, maxY,
+            width: Math.max(100, maxX - minX),
+            height: Math.max(100, maxY - minY)
+        };
+    }
+
+    function renderMinimap() {
+        if (!minimapIsOpen || !minimapCanvas) return;
+        const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+        if (!ws) return;
+
+        const ctx = minimapCanvas.getContext("2d");
+        const cw = minimapCanvas.width;
+        const ch = minimapCanvas.height;
+        ctx.clearRect(0, 0, cw, ch);
+
+        const inj = ws.getInjectionDiv ? ws.getInjectionDiv() : document.body;
+        const viewW = inj.clientWidth || 1000;
+        const viewH = inj.clientHeight || 800;
+        const scale = ws.scale || 1;
+
+        // 現在の画面表示範囲 (ワークスペース座標)
+        const curLeft = -ws.scrollX / scale;
+        const curTop = -ws.scrollY / scale;
+        const curRight = curLeft + (viewW / scale);
+        const curBottom = curTop + (viewH / scale);
+
+        // ブロック全体範囲と画面範囲を統合したマップの表示領域を決定
+        const b = getWorkspaceBounds(ws);
+        const pad = 200;
+        const mapMinX = Math.min(b.minX, curLeft) - pad;
+        const mapMinY = Math.min(b.minY, curTop) - pad;
+        const mapMaxX = Math.max(b.maxX, curRight) + pad;
+        const mapMaxY = Math.max(b.maxY, curBottom) + pad;
+        const mapW = mapMaxX - mapMinX;
+        const mapH = mapMaxY - mapMinY;
+
+        // 縮小率 (アスペクト比維持)
+        const zoom = Math.min(cw / mapW, ch / mapH);
+        const offX = (cw - mapW * zoom) / 2;
+        const offY = (ch - mapH * zoom) / 2;
+
+        const toMapX = (x) => offX + (x - mapMinX) * zoom;
+        const toMapY = (y) => offY + (y - mapMinY) * zoom;
+
+        // キャッシュ（クリック判定用）
+        minimapCanvas._mapData = { mapMinX, mapMinY, zoom, offX, offY, viewW, viewH, scale };
+
+        // 1. 各ブロックの簡易描画
+        ctx.fillStyle = "rgba(85, 223, 255, 0.45)";
+        for (const block of ws.getTopBlocks ? ws.getTopBlocks(false) : []) {
+            const xy = block.getRelativeToSurfaceXY ? block.getRelativeToSurfaceXY() : { x: 0, y: 0 };
+            const hw = block.getHeightWidth ? block.getHeightWidth() : { width: 80, height: 40 };
+            ctx.fillRect(toMapX(xy.x), toMapY(xy.y), Math.max(3, hw.width * zoom), Math.max(3, hw.height * zoom));
+        }
+
+        // 2. 現在の画面表示枠 (ビューポート) の描画
+        const vx = toMapX(curLeft);
+        const vy = toMapY(curTop);
+        const vw = (viewW / scale) * zoom;
+        const vh = (viewH / scale) * zoom;
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
+        ctx.fillRect(vx, vy, vw, vh);
+        ctx.strokeStyle = "#55dfff";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(vx, vy, vw, vh);
+    }
+
+    function moveWorkspaceToMapPos(mx, my) {
+        const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+        const data = minimapCanvas && minimapCanvas._mapData;
+        if (!ws || !data) return;
+
+        // ミニマップ座標からワークスペース中心座標へ変換
+        const wsX = data.mapMinX + (mx - data.offX) / data.zoom;
+        const wsY = data.mapMinY + (my - data.offY) / data.zoom;
+
+        const targetScrollX = -(wsX * data.scale) + (data.viewW / 2);
+        const targetScrollY = -(wsY * data.scale) + (data.viewH / 2);
+
+        if (typeof ws.scroll === "function") {
+            try { ws.scroll(targetScrollX, targetScrollY); } catch (_) { }
+        }
+        if (typeof ws.translate === "function") {
+            ws.scrollX = targetScrollX;
+            ws.scrollY = targetScrollY;
+            ws.translate(targetScrollX, targetScrollY);
+        }
+        if (ws.scrollbar && typeof ws.scrollbar.resize === "function") {
+            try { ws.scrollbar.resize(); } catch (_) { }
+        }
+        renderMinimap();
+    }
+
+    function createMinimapPanel() {
+        if (minimapPanel) return;
+        const ja = getPortalLanguage() === "ja";
+
+        const panel = document.createElement("div");
+        panel.id = "bf6-minimap-panel";
+        panel.style.cssText = [
+            "position:fixed", "z-index:2147483640", "top:70px", "right:20px",
+            "width:260px", "background:rgba(20,26,34,.95)", "border:1px solid #667381",
+            "border-radius:6px", "box-shadow:0 6px 22px rgba(0,0,0,.5)", "display:none",
+            "flex-direction:column", "user-select:none", "overflow:hidden"
+        ].join(";");
+
+        const header = document.createElement("div");
+        header.style.cssText = "height:26px;background:#2b3440;display:flex;align-items:center;padding:0 8px;font-size:12px;font-weight:bold;color:#fff;";
+        header.textContent = ja ? "全体マップ (移動)" : "Minimap (Navigate)";
+
+        const closeBtn = document.createElement("button");
+        closeBtn.textContent = "✕";
+        closeBtn.style.cssText = "margin-left:auto;background:transparent;border:0;color:#aaa;cursor:pointer;font-size:14px;";
+        closeBtn.onclick = () => toggleMinimap(false);
+        header.appendChild(closeBtn);
+
+        const canvas = document.createElement("canvas");
+        canvas.width = 258;
+        canvas.height = 180;
+        canvas.style.cssText = "background:#12161c;cursor:crosshair;display:block;";
+
+        let isDragging = false;
+        const handlePointer = (e) => {
+            const rect = canvas.getBoundingClientRect();
+            moveWorkspaceToMapPos(e.clientX - rect.left, e.clientY - rect.top);
+        };
+        canvas.addEventListener("pointerdown", (e) => {
+            if (e.button !== 0) return;
+            isDragging = true;
+            canvas.setPointerCapture(e.pointerId);
+            handlePointer(e);
+        });
+        canvas.addEventListener("pointermove", (e) => { if (isDragging) handlePointer(e); });
+        const stopDrag = (e) => {
+            isDragging = false;
+            try { canvas.releasePointerCapture(e.pointerId); } catch (_) { }
+        };
+        canvas.addEventListener("pointerup", stopDrag);
+        canvas.addEventListener("pointercancel", stopDrag);
+
+        panel.appendChild(header);
+        panel.appendChild(canvas);
+        document.body.appendChild(panel);
+
+        minimapPanel = panel;
+        minimapCanvas = canvas;
+    }
+
+    function toggleMinimap(force) {
+        createMinimapPanel();
+        minimapIsOpen = typeof force === "boolean" ? force : !minimapIsOpen;
+        minimapPanel.style.display = minimapIsOpen ? "flex" : "none";
+        if (minimapButton) {
+            minimapButton.style.borderColor = minimapIsOpen ? "#55dfff" : "#667381";
+            minimapButton.style.color = minimapIsOpen ? "#55dfff" : "#fff";
+        }
+        if (minimapIsOpen) {
+            const loop = () => {
+                renderMinimap();
+                if (minimapIsOpen) minimapAnimId = requestAnimationFrame(loop);
+            };
+            loop();
+        } else if (minimapAnimId) {
+            cancelAnimationFrame(minimapAnimId);
+        }
+    }
+
+    // 右上ツールバーへのアイコン配置（検索バーの幅伸縮を考慮し、Flex親要素の先頭に挿入）
+    function initMinimapButton() {
+        if (minimapButton && document.body.contains(minimapButton)) return;
+
+        // 検索や保存アイコン等が含まれるコンテナを検索
+        const searchOrSave = document.querySelector('button[aria-label*="Search"], button[aria-label*="検索"], button[aria-label*="Save"], button[aria-label*="保存"], input[placeholder*="Search"], input[placeholder*="検索"]');
+        const container = (searchOrSave && searchOrSave.closest(".btn-group, [class*='header'], [class*='toolbar'], [class*='actions']"))
+            || (searchOrSave && searchOrSave.parentElement);
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.id = "bf6-minimap-toggle-btn";
+        btn.title = getPortalLanguage() === "ja" ? "全体マップ表示/移動" : "Toggle Minimap";
+        // ミニマップ・ナビアイコン（コンパス・マップ風SVG）
+        btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"></polygon><line x1="9" y1="3" x2="9" y2="18"></line><line x1="15" y1="6" x2="15" y2="21"></line></svg>`;
+        btn.style.cssText = [
+            "height:32px", "width:36px", "padding:0", "margin:0 4px", "display:inline-flex",
+            "align-items:center", "justify-content:center", "background:#20262d",
+            "border:1px solid #667381", "border-radius:4px", "color:#fff",
+            "cursor:pointer", "flex-shrink:0", "z-index:100"
+        ].join(";");
+
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            toggleMinimap();
+        };
+
+        if (container) {
+            // 既存のボタングループの先頭（左側）に挿入することで検索バー展開時の重なりを回避
+            container.insertBefore(btn, container.firstChild);
+        } else {
+            // 親が特定できない場合のフォールバック固定配置
+            btn.style.position = "fixed";
+            btn.style.top = "18px";
+            btn.style.right = "320px";
+            document.body.appendChild(btn);
+        }
+        minimapButton = btn;
     }
 
     function initScrollWheel() {
@@ -788,6 +1019,7 @@
         try {
             registerMenus();
             initScrollWheel();
+            initMinimapButton(); // ← ここを追加
         } catch (e) {
             if (BF2042Portal.Shared && typeof BF2042Portal.Shared.logError === "function") {
                 BF2042Portal.Shared.logError("BlockUtility initialization", String(e));
