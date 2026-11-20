@@ -710,10 +710,10 @@
     let minimapIsCollapsed = false;
     let minimapAnimId = null;
     let minimapDragState = null;
+    let minimapZoom = 1; // 1.0 〜 4.0（ホイールで無段階変更）
     let minimapFocusAnchor = null;
     let minimapAutoScrollId = null;
     let minimapEdgeDir = { x: 0, y: 0 };
-    let minimapZoom = 1; // 1.0 〜 4.0（ホイールで無段階変更）
 
     function getWorkspaceBounds(ws) {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -734,6 +734,90 @@
             width: Math.max(100, maxX - minX),
             height: Math.max(100, maxY - minY)
         };
+    }
+
+    function stopMinimapEdgeAutoScroll() {
+        if (minimapAutoScrollId) {
+            cancelAnimationFrame(minimapAutoScrollId);
+            minimapAutoScrollId = null;
+        }
+        minimapEdgeDir.x = 0;
+        minimapEdgeDir.y = 0;
+    }
+
+    function updateMinimapEdgeAutoScroll(mx, my) {
+        if (!minimapCanvas) return;
+        if (minimapZoom <= 1.001) {
+            minimapEdgeDir.x = 0;
+            minimapEdgeDir.y = 0;
+            return;
+        }
+
+        const edgeZone = 32;
+        const cw = minimapCanvas.width;
+        const ch = minimapCanvas.height;
+
+        let dx = 0;
+        let dy = 0;
+        if (mx >= 0 && mx < edgeZone) {
+            const ratio = (edgeZone - mx) / edgeZone;
+            dx = -(ratio * ratio);
+        } else if (mx > cw - edgeZone && mx <= cw) {
+            const ratio = (mx - (cw - edgeZone)) / edgeZone;
+            dx = ratio * ratio;
+        }
+
+        if (my >= 0 && my < edgeZone) {
+            const ratio = (edgeZone - my) / edgeZone;
+            dy = -(ratio * ratio);
+        } else if (my > ch - edgeZone && my <= ch) {
+            const ratio = (my - (ch - edgeZone)) / edgeZone;
+            dy = ratio * ratio;
+        }
+
+        minimapEdgeDir.x = dx;
+        minimapEdgeDir.y = dy;
+
+        if ((dx !== 0 || dy !== 0) && !minimapAutoScrollId) {
+            const step = () => {
+                if (!minimapIsOpen || minimapIsCollapsed || !minimapFocusAnchor) {
+                    stopMinimapEdgeAutoScroll();
+                    return;
+                }
+                const data = minimapCanvas && minimapCanvas._mapData;
+                if (!data || (!minimapEdgeDir.x && !minimapEdgeDir.y)) {
+                    stopMinimapEdgeAutoScroll();
+                    return;
+                }
+
+                const speed = 7.0;
+                const wsDeltaX = (minimapEdgeDir.x * speed) / data.zoom;
+                const wsDeltaY = (minimapEdgeDir.y * speed) / data.zoom;
+
+                minimapFocusAnchor.x += wsDeltaX;
+                minimapFocusAnchor.y += wsDeltaY;
+
+                const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+                if (ws) {
+                    const targetScrollX = -(minimapFocusAnchor.x * data.scale) + (data.viewW / 2);
+                    const targetScrollY = -(minimapFocusAnchor.y * data.scale) + (data.viewH / 2);
+                    ws.scrollX = targetScrollX;
+                    ws.scrollY = targetScrollY;
+                    if (typeof ws.translate === "function") {
+                        ws.translate(targetScrollX, targetScrollY);
+                    }
+                    if (typeof ws.scroll === "function") {
+                        try { ws.scroll(targetScrollX, targetScrollY); } catch (_) { }
+                    }
+                }
+
+                renderMinimap();
+                minimapAutoScrollId = requestAnimationFrame(step);
+            };
+            minimapAutoScrollId = requestAnimationFrame(step);
+        } else if (dx === 0 && dy === 0) {
+            stopMinimapEdgeAutoScroll();
+        }
     }
 
     function renderMinimap() {
@@ -765,7 +849,6 @@
         const mapW = mapMaxX - mapMinX;
         const mapH = mapMaxY - mapMinY;
 
-        // 1x/2x/4x の倍率計算
         const mult = minimapZoom;
         const baseZoom = Math.min(cw / mapW, ch / mapH);
         const zoom = baseZoom * mult;
@@ -857,90 +940,6 @@
         ctx.strokeRect(vx, vy, vw, vh);
     }
 
-    function updateMinimapEdgeAutoScroll(mx, my) {
-        if (!minimapCanvas) return;
-        if (minimapZoom <= 1.001) {
-            minimapEdgeDir.x = 0;
-            minimapEdgeDir.y = 0;
-            return;
-        }
-
-        const edgeZone = 32;
-        const cw = minimapCanvas.width;
-        const ch = minimapCanvas.height;
-
-        let dx = 0;
-        let dy = 0;
-        if (mx >= 0 && mx < edgeZone) {
-            const ratio = (edgeZone - mx) / edgeZone; // 0〜1
-            dx = -(ratio * ratio); // 端に近づくほど加速（2乗カーブ）
-        } else if (mx > cw - edgeZone && mx <= cw) {
-            const ratio = (mx - (cw - edgeZone)) / edgeZone; // 0〜1
-            dx = ratio * ratio;
-        }
-
-        if (my >= 0 && my < edgeZone) {
-            const ratio = (edgeZone - my) / edgeZone; // 0〜1
-            dy = -(ratio * ratio);
-        } else if (my > ch - edgeZone && my <= ch) {
-            const ratio = (my - (ch - edgeZone)) / edgeZone; // 0〜1
-            dy = ratio * ratio;
-        }
-
-        minimapEdgeDir.x = dx;
-        minimapEdgeDir.y = dy;
-
-        if ((dx !== 0 || dy !== 0) && !minimapAutoScrollId) {
-            const step = () => {
-                if (!minimapIsOpen || minimapIsCollapsed || !minimapFocusAnchor) {
-                    stopMinimapEdgeAutoScroll();
-                    return;
-                }
-                const data = minimapCanvas && minimapCanvas._mapData;
-                if (!data || (!minimapEdgeDir.x && !minimapEdgeDir.y)) {
-                    stopMinimapEdgeAutoScroll();
-                    return;
-                }
-
-                const speed = 7.0; // 端ギリギリで以前の約2倍（px/frame）
-                const wsDeltaX = (minimapEdgeDir.x * speed) / data.zoom;
-                const wsDeltaY = (minimapEdgeDir.y * speed) / data.zoom;
-
-                minimapFocusAnchor.x += wsDeltaX;
-                minimapFocusAnchor.y += wsDeltaY;
-
-                const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
-                if (ws) {
-                    const targetScrollX = -(minimapFocusAnchor.x * data.scale) + (data.viewW / 2);
-                    const targetScrollY = -(minimapFocusAnchor.y * data.scale) + (data.viewH / 2);
-                    ws.scrollX = targetScrollX;
-                    ws.scrollY = targetScrollY;
-                    if (typeof ws.translate === "function") {
-                        ws.translate(targetScrollX, targetScrollY);
-                    }
-                    if (typeof ws.scroll === "function") {
-                        try { ws.scroll(targetScrollX, targetScrollY); } catch (_) { }
-                    }
-                }
-
-                renderMinimap();
-                minimapAutoScrollId = requestAnimationFrame(step);
-            };
-            minimapAutoScrollId = requestAnimationFrame(step);
-        } else if (dx === 0 && dy === 0) {
-            stopMinimapEdgeAutoScroll();
-        }
-    }
-
-    function stopMinimapEdgeAutoScroll() {
-        if (minimapAutoScrollId) {
-            cancelAnimationFrame(minimapAutoScrollId);
-            minimapAutoScrollId = null;
-        }
-        minimapEdgeDir.x = 0;
-        minimapEdgeDir.y = 0;
-    }
-
     // マウスホバー位置のブロック名を取得して情報枠へ表示
     function updateHoveredBlockInfo(mx, my) {
         if (!minimapInfoBar) return;
@@ -958,7 +957,6 @@
         let found = null;
         let bestArea = Infinity;
 
-        // カーソル下の候補のうち、最も小さい領域（重なり時は最前面/個別要素）を優先
         for (const block of allBlocks) {
             if (block.type !== "ruleBlock" && block.type !== "subroutineBlock") continue;
             const xy = block.getRelativeToSurfaceXY ? block.getRelativeToSurfaceXY() : { x: 0, y: 0 };
@@ -1129,26 +1127,6 @@
         titleText.style.cssText = "flex:1;pointer-events:none;";
         header.appendChild(titleText);
 
-        // ★ 1x / 2x / 4x 切り替えボタン
-        const zoomBtn = document.createElement("button");
-        zoomBtn.type = "button";
-        zoomBtn.textContent = "1x";
-        zoomBtn.title = ja ? "拡大率の切り替え (1x / 2x / 4x)" : "Toggle Zoom (1x / 2x / 4x)";
-        zoomBtn.style.cssText = [
-            "height:20px", "padding:0 6px", "margin-right:8px", "background:#1e252e",
-            "border:1px solid #55dfff", "border-radius:3px", "color:#55dfff",
-            "font-size:11px", "font-weight:bold", "cursor:pointer", "line-height:18px"
-        ].join(";");
-        zoomBtn.onclick = (e) => {
-            e.stopPropagation();
-            minimapFocusAnchor = null;
-            minimapZoomIndex = (minimapZoomIndex + 1) % minimapZoomLevels.length;
-            zoomBtn.textContent = minimapZoomLevels[minimapZoomIndex] + "x";
-            renderMinimap();
-        };
-        header.appendChild(zoomBtn);
-        minimapZoomBtn = zoomBtn;
-
         const closeBtn = document.createElement("button");
         closeBtn.textContent = "✕";
         closeBtn.title = ja ? "完全に閉じる" : "Close";
@@ -1161,7 +1139,6 @@
 
         makeMinimapPanelDraggable(panel, header);
 
-        // ★ タイトル下のブロック名表示枠
         const infoBar = document.createElement("div");
         infoBar.style.cssText = [
             "height:44px", "background:#171d24", "border-top:1px solid #333d4b",
@@ -1210,7 +1187,6 @@
             } else {
                 stopMinimapEdgeAutoScroll();
             }
-            // ホバー時のブロック名更新
             updateHoveredBlockInfo(mx, my);
         });
         canvas.addEventListener("pointerleave", () => {
@@ -1249,11 +1225,9 @@
             const my = e.clientY - rect.top;
             const data = canvas._mapData;
 
-            // ホイール前にカーソルが指していたワークスペース座標を保持
             const focusWsX = data ? data.mapMinX + (mx - data.offX) / data.zoom : null;
             const focusWsY = data ? data.mapMinY + (my - data.offY) / data.zoom : null;
 
-            // 1x 〜 4x で無段階変更
             const stepFactor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
             minimapZoom = Math.max(1, Math.min(4, minimapZoom * stepFactor));
 
@@ -1261,7 +1235,6 @@
                 minimapZoom = 1;
                 minimapFocusAnchor = null;
             } else if (focusWsX != null && focusWsY != null && data) {
-                // カーソル位置がキャンバス上の同じ (mx, my) に留まるようアンカーを補正
                 const cw = canvas.width;
                 const ch = canvas.height;
                 const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
