@@ -771,13 +771,14 @@
         let baseWidth;
 
         if (childWidths.length > 0) {
-            baseWidth = Math.max(...childWidths); // 子ブロック横幅の最大値
+            const sum = childWidths.reduce((acc, w) => acc + w, 0);
+            baseWidth = sum / childWidths.length; // 子ブロック横幅の平均
         } else {
             baseWidth = fallbackWidth > 0 ? fallbackWidth : 120;
         }
 
         const singleWidth = Math.max(80, Math.min(1200, Math.round(baseWidth)));
-        return singleWidth ; // ルールブロック横幅を4倍
+        return singleWidth * 4; // ルールブロック横幅を4倍
     }
 
     function getRuleMapBounds(block) {
