@@ -957,6 +957,10 @@
         wheelListenerAttached = true;
     }
 
+    function minimapMenuText() {
+        return getPortalLanguage() === "ja" ? "全体マップで移動" : "Navigate with Minimap";
+    }
+
     function registerMenus() {
         if (menusRegistered) return;
         const Scope = _Blockly.ContextMenuRegistry.ScopeType;
@@ -991,6 +995,9 @@
         plugin.registerItem(sourceItem);
         _Blockly.ContextMenuRegistry.registry.register(sourceItem);
 
+        // Blocklyは右クリックした対象によって context menu の scope が変わるため、
+        // BLOCK と WORKSPACE の両方に同じ「ブロック検索」を登録する。
+        // BLOCK 側では、右クリックしたブロックのテキストをそのまま検索する。
         const blockSearchItem = {
             id: "blockUtilityBlockSearch",
             displayText: () => blockSearchText(),
@@ -1004,6 +1011,7 @@
         plugin.registerItem(blockSearchItem);
         _Blockly.ContextMenuRegistry.registry.register(blockSearchItem);
 
+        // ブロック以外のワークスペース上でも表示する。
         const workspaceBlockSearchItem = {
             id: "blockUtilityBlockSearchWorkspace",
             displayText: () => blockSearchText(),
@@ -1031,49 +1039,43 @@
         plugin.registerItem(ruleNumberItem);
         _Blockly.ContextMenuRegistry.registry.register(ruleNumberItem);
 
+        const minimapWorkspaceItem = {
+            id: "blockUtilityMinimapWorkspace",
+            displayText: () => minimapMenuText(),
+            scopeType: Scope.WORKSPACE,
+            weight: 85,
+            preconditionFn: () => "enabled",
+            callback: () => {
+                toggleMinimap(true);
+            }
+        };
+        plugin.registerItem(minimapWorkspaceItem);
+        _Blockly.ContextMenuRegistry.registry.register(minimapWorkspaceItem);
+
+        const minimapBlockItem = {
+            id: "blockUtilityMinimapBlock",
+            displayText: () => minimapMenuText(),
+            scopeType: Scope.BLOCK,
+            weight: 85,
+            preconditionFn: scope => scope && scope.block ? "enabled" : "hidden",
+            callback: () => {
+                toggleMinimap(true);
+            }
+        };
+        plugin.registerItem(minimapBlockItem);
+        _Blockly.ContextMenuRegistry.registry.register(minimapBlockItem);
+
         menusRegistered = true;
-        function minimapMenuText() {
-            return getPortalLanguage() === "ja" ? "全体マップで移動" : "Navigate with Minimap";
-        }
-
-        // 既存の registerMenus() 内に追加
-        function registerMenus() {
-            if (menusRegistered) return;
-            const Scope = _Blockly.ContextMenuRegistry.ScopeType;
-
-            // --- (既存の subroutineItem, sourceItem, blockSearchItem 等) ---
-
-            // ★ ワークスペースの右クリックメニューに追加
-            const minimapWorkspaceItem = {
-                id: "blockUtilityMinimapWorkspace",
-                displayText: () => minimapMenuText(),
-                scopeType: Scope.WORKSPACE,
-                weight: 85,
-                preconditionFn: () => "enabled",
-                callback: () => {
-                    toggleMinimap(true);
-                }
-            };
-            plugin.registerItem(minimapWorkspaceItem);
-            _Blockly.ContextMenuRegistry.registry.register(minimapWorkspaceItem);
-
-            // ★ ブロック上の右クリックメニューにも追加
-            const minimapBlockItem = {
-                id: "blockUtilityMinimapBlock",
-                displayText: () => minimapMenuText(),
-                scopeType: Scope.BLOCK,
-                weight: 85,
-                preconditionFn: scope => scope && scope.block ? "enabled" : "hidden",
-                callback: () => {
-                    toggleMinimap(true);
-                }
-            };
-            plugin.registerItem(minimapBlockItem);
-            _Blockly.ContextMenuRegistry.registry.register(minimapBlockItem);
-
-            menusRegistered = true;
-        }
     }
 
-
+    plugin.initializeWorkspace = async function () {
+        try {
+            registerMenus();
+            initScrollWheel();
+        } catch (e) {
+            if (BF2042Portal.Shared && typeof BF2042Portal.Shared.logError === "function") {
+                BF2042Portal.Shared.logError("BlockUtility initialization", String(e));
+            }
+        }
+    };
 })();
