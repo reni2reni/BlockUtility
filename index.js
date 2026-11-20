@@ -711,6 +711,8 @@
     let minimapIsCollapsed = false;
     let minimapAnimId = null;
     let minimapDragState = null;
+    let minimapFocusAnchor = null;
+
     const minimapZoomLevels = [1, 2, 4];
     let minimapZoomIndex = 0; // 0: 1x, 1: 2x, 2: 4x
 
@@ -772,13 +774,18 @@
         // 1x時は全体中央配置、2x/4x時は現在の視点中央をフォーカス
         let offX, offY;
         if (mult === 1) {
+            minimapFocusAnchor = null;
             offX = (cw - mapW * zoom) / 2;
             offY = (ch - mapH * zoom) / 2;
         } else {
-            const curCenterX = curLeft + (viewW / scale) / 2;
-            const curCenterY = curTop + (viewH / scale) / 2;
-            offX = (cw / 2) - (curCenterX - mapMinX) * zoom;
-            offY = (ch / 2) - (curCenterY - mapMinY) * zoom;
+            if (!minimapFocusAnchor) {
+                minimapFocusAnchor = {
+                    x: curLeft + (viewW / scale) / 2,
+                    y: curTop + (viewH / scale) / 2
+                };
+            }
+            offX = (cw / 2) - (minimapFocusAnchor.x - mapMinX) * zoom;
+            offY = (ch / 2) - (minimapFocusAnchor.y - mapMinY) * zoom;
         }
 
         const toMapX = (x) => offX + (x - mapMinX) * zoom;
@@ -867,15 +874,24 @@
 
         const allBlocks = ws.getAllBlocks ? ws.getAllBlocks(false) : [];
         let found = null;
+        let bestArea = Infinity;
 
-        // カーソル下のブロックを正確に1つずつ検出
+        // カーソル下の候補のうち、最も小さい領域（重なり時は最前面/個別要素）を優先
         for (const block of allBlocks) {
             if (block.type !== "ruleBlock" && block.type !== "subroutineBlock") continue;
             const xy = block.getRelativeToSurfaceXY ? block.getRelativeToSurfaceXY() : { x: 0, y: 0 };
             const hw = block.getHeightWidth ? block.getHeightWidth() : { width: 80, height: 40 };
-            if (wsX >= xy.x && wsX <= xy.x + hw.width && wsY >= xy.y && wsY <= xy.y + hw.height) {
-                found = block;
-                break;
+            const left = xy.x;
+            const top = xy.y;
+            const right = xy.x + hw.width;
+            const bottom = xy.y + hw.height;
+
+            if (wsX >= left && wsX <= right && wsY >= top && wsY <= bottom) {
+                const area = Math.max(1, hw.width) * Math.max(1, hw.height);
+                if (area < bestArea) {
+                    bestArea = area;
+                    found = block;
+                }
             }
         }
 
@@ -907,16 +923,14 @@
         const targetScrollX = -(wsX * data.scale) + (data.viewW / 2);
         const targetScrollY = -(wsY * data.scale) + (data.viewH / 2);
 
-        if (typeof ws.scroll === "function") {
-            try { ws.scroll(targetScrollX, targetScrollY); } catch (_) { }
-        }
+        ws.scrollX = targetScrollX;
+        ws.scrollY = targetScrollY;
+
         if (typeof ws.translate === "function") {
-            ws.scrollX = targetScrollX;
-            ws.scrollY = targetScrollY;
             ws.translate(targetScrollX, targetScrollY);
         }
-        if (ws.scrollbar && typeof ws.scrollbar.resize === "function") {
-            try { ws.scrollbar.resize(); } catch (_) { }
+        if (typeof ws.scroll === "function") {
+            try { ws.scroll(targetScrollX, targetScrollY); } catch (_) { }
         }
         renderMinimap();
     }
@@ -1044,6 +1058,7 @@
         ].join(";");
         zoomBtn.onclick = (e) => {
             e.stopPropagation();
+            minimapFocusAnchor = null;
             minimapZoomIndex = (minimapZoomIndex + 1) % minimapZoomLevels.length;
             zoomBtn.textContent = minimapZoomLevels[minimapZoomIndex] + "x";
             renderMinimap();
@@ -1087,6 +1102,17 @@
         canvas.addEventListener("pointerdown", (e) => {
             if (e.button !== 0) return;
             isDragging = true;
+            const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+            const data = canvas._mapData;
+            if (ws && data && minimapZoomLevels[minimapZoomIndex] !== 1) {
+                const scale = ws.scale || 1;
+                const curLeft = -(ws.scrollX || 0) / scale;
+                const curTop = -(ws.scrollY || 0) / scale;
+                minimapFocusAnchor = {
+                    x: curLeft + (data.viewW / scale) / 2,
+                    y: curTop + (data.viewH / scale) / 2
+                };
+            }
             canvas.setPointerCapture(e.pointerId);
             handlePointer(e);
         });
@@ -1108,6 +1134,19 @@
             }
         });
         const stopDrag = (e) => {
+            if (isDragging && minimapZoomLevels[minimapZoomIndex] !== 1) {
+                const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+                const data = canvas._mapData;
+                if (ws && data) {
+                    const scale = ws.scale || 1;
+                    const curLeft = -(ws.scrollX || 0) / scale;
+                    const curTop = -(ws.scrollY || 0) / scale;
+                    minimapFocusAnchor = {
+                        x: curLeft + (data.viewW / scale) / 2,
+                        y: curTop + (data.viewH / scale) / 2
+                    };
+                }
+            }
             isDragging = false;
             try { canvas.releasePointerCapture(e.pointerId); } catch (_) { }
         };
