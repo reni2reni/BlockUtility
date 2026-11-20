@@ -724,33 +724,27 @@
         let height = 40;
 
         try {
-            if (block && typeof block.getBoundingRectangle === "function") {
-                const rect = block.getBoundingRectangle();
-                if (rect) {
-                    const rw = Number(rect.getWidth ? rect.getWidth() : rect.width);
-                    const rh = Number(rect.getHeight ? rect.getHeight() : rect.height);
-                    if (Number.isFinite(rw) && rw > 0) width = rw;
-                    if (Number.isFinite(rh) && rh > 0) height = rh;
-                    return { x: Number(xy.x) || 0, y: Number(xy.y) || 0, width, height };
-                }
+            const root = block && typeof block.getSvgRoot === "function" ? block.getSvgRoot() : null;
+            const pathEl = root && root.querySelector ? root.querySelector(":scope > path.blocklyPath") : null;
+            if (pathEl && typeof pathEl.getBBox === "function") {
+                const bbox = pathEl.getBBox();
+                if (bbox && bbox.width > 0) width = bbox.width;
+                if (bbox && bbox.height > 0) height = bbox.height;
+                return { x: Number(xy.x) || 0, y: Number(xy.y) || 0, width, height };
             }
         } catch (_) { }
 
         try {
             if (block && typeof block.getHeightWidth === "function") {
                 const hw = block.getHeightWidth();
-                if (hw) {
-                    const hwW = Number(hw.width);
-                    const hwH = Number(hw.height);
-                    if (Number.isFinite(hwW) && hwW > 0) width = hwW;
-                    if (Number.isFinite(hwH) && hwH > 0) height = hwH;
-                }
+                if (hw && hw.width > 0) width = hw.width;
+                if (hw && hw.height > 0) height = hw.height;
             }
         } catch (_) { }
 
         return { x: Number(xy.x) || 0, y: Number(xy.y) || 0, width, height };
     }
-
+    
     function getWorkspaceBounds(ws) {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         const blocks = ws.getTopBlocks ? ws.getTopBlocks(false) : [];
