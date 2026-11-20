@@ -705,10 +705,14 @@
     // ===== 全体縮小ミニマップ =====
     let minimapPanel = null;
     let minimapCanvas = null;
+    let minimapInfoBar = null;
+    let minimapZoomBtn = null;
     let minimapIsOpen = false;
     let minimapIsCollapsed = false;
     let minimapAnimId = null;
     let minimapDragState = null;
+    const minimapZoomLevels = [1, 2, 4];
+    let minimapZoomIndex = 0; // 0: 1x, 1: 2x, 2: 4x
 
     function getWorkspaceBounds(ws) {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -760,9 +764,22 @@
         const mapW = mapMaxX - mapMinX;
         const mapH = mapMaxY - mapMinY;
 
-        const zoom = Math.min(cw / mapW, ch / mapH);
-        const offX = (cw - mapW * zoom) / 2;
-        const offY = (ch - mapH * zoom) / 2;
+        // 1x/2x/4x の倍率計算
+        const mult = minimapZoomLevels[minimapZoomIndex];
+        const baseZoom = Math.min(cw / mapW, ch / mapH);
+        const zoom = baseZoom * mult;
+
+        // 1x時は全体中央配置、2x/4x時は現在の視点中央をフォーカス
+        let offX, offY;
+        if (mult === 1) {
+            offX = (cw - mapW * zoom) / 2;
+            offY = (ch - mapH * zoom) / 2;
+        } else {
+            const curCenterX = curLeft + (viewW / scale) / 2;
+            const curCenterY = curTop + (viewH / scale) / 2;
+            offX = (cw / 2) - (curCenterX - mapMinX) * zoom;
+            offY = (ch / 2) - (curCenterY - mapMinY) * zoom;
+        }
 
         const toMapX = (x) => offX + (x - mapMinX) * zoom;
         const toMapY = (y) => offY + (y - mapMinY) * zoom;
@@ -772,7 +789,7 @@
         const allBlocks = ws.getAllBlocks ? ws.getAllBlocks(false) : [];
         const topBlocks = ws.getTopBlocks ? ws.getTopBlocks(false) : [];
 
-        // 1. MODブロック等の外枠ベース（下敷きとして暗めのグレーで描画）
+        // 1. MODブロック等の外枠ベース
         ctx.fillStyle = "rgba(42, 54, 68, 0.45)";
         ctx.strokeStyle = "rgba(68, 85, 105, 0.6)";
         ctx.lineWidth = 1;
@@ -788,7 +805,7 @@
             ctx.strokeRect(bx, by, bw, bh);
         }
 
-        // 2. ルールブロック（赤紫）＋ 各ルールの境目枠線
+        // 2. ルールブロック（赤紫＋境目）
         for (const block of allBlocks) {
             if (block.type !== "ruleBlock") continue;
             const xy = block.getRelativeToSurfaceXY ? block.getRelativeToSurfaceXY() : { x: 0, y: 0 };
@@ -798,17 +815,14 @@
             const bw = Math.max(4, hw.width * zoom);
             const bh = Math.max(4, hw.height * zoom);
 
-            // 赤紫で塗りつぶし
             ctx.fillStyle = "rgba(168, 43, 107, 0.75)";
             ctx.fillRect(bx, by, bw, bh);
-
-            // ルールごとの境目がはっきりわかる枠線
             ctx.strokeStyle = "rgba(255, 115, 185, 0.95)";
             ctx.lineWidth = 1;
             ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
         }
 
-        // 3. サブルーチンブロック（茶色）＋ 枠線
+        // 3. サブルーチンブロック（茶色＋枠線）
         for (const block of allBlocks) {
             if (block.type !== "subroutineBlock") continue;
             const xy = block.getRelativeToSurfaceXY ? block.getRelativeToSurfaceXY() : { x: 0, y: 0 };
@@ -818,17 +832,14 @@
             const bw = Math.max(4, hw.width * zoom);
             const bh = Math.max(4, hw.height * zoom);
 
-            // 茶色で塗りつぶし
             ctx.fillStyle = "rgba(145, 78, 32, 0.85)";
             ctx.fillRect(bx, by, bw, bh);
-
-            // サブルーチンの枠線
             ctx.strokeStyle = "rgba(225, 155, 95, 0.95)";
             ctx.lineWidth = 1;
             ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
         }
 
-        // 4. 現在の画面表示枠 (ビューポート) の描画
+        // 4. 現在の画面表示枠 (ビューポート)
         const vx = toMapX(curLeft);
         const vy = toMapY(curTop);
         const vw = (viewW / scale) * zoom;
@@ -839,6 +850,50 @@
         ctx.strokeStyle = "#55dfff";
         ctx.lineWidth = 2;
         ctx.strokeRect(vx, vy, vw, vh);
+    }
+
+    // マウスホバー位置のブロック名を取得して情報枠へ表示
+    function updateHoveredBlockInfo(mx, my) {
+        if (!minimapInfoBar) return;
+        const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+        const data = minimapCanvas && minimapCanvas._mapData;
+        if (!ws || !data) {
+            minimapInfoBar.textContent = "---";
+            return;
+        }
+
+        const wsX = data.mapMinX + (mx - data.offX) / data.zoom;
+        const wsY = data.mapMinY + (my - data.offY) / data.zoom;
+
+        const allBlocks = ws.getAllBlocks ? ws.getAllBlocks(false) : [];
+        let found = null;
+
+        // ルールブロックとサブルーチンを判定
+        for (const block of allBlocks) {
+            if (block.type !== "ruleBlock" && block.type !== "subroutineBlock") continue;
+            const xy = block.getRelativeToSurfaceXY ? block.getRelativeToSurfaceXY() : { x: 0, y: 0 };
+            const hw = block.getHeightWidth ? block.getHeightWidth() : { width: 80, height: 40 };
+            if (wsX >= xy.x && wsX <= xy.x + hw.width && wsY >= xy.y && wsY <= xy.y + hw.height) {
+                found = block;
+                break;
+            }
+        }
+
+        const ja = getPortalLanguage() === "ja";
+        if (found) {
+            if (found.type === "ruleBlock") {
+                const name = getRuleBlockName(found) || (ja ? "(無名のルール)" : "(Unnamed Rule)");
+                minimapInfoBar.textContent = `${ja ? "[ルール] " : "[Rule] "} ${name}`;
+                minimapInfoBar.style.color = "#ff85c8";
+            } else {
+                const name = getSubroutineBlockName(found) || (ja ? "(無名のサブルーチン)" : "(Unnamed Subroutine)");
+                minimapInfoBar.textContent = `${ja ? "[サブルーチン] " : "[Subroutine] "} ${name}`;
+                minimapInfoBar.style.color = "#f0a66d";
+            }
+        } else {
+            minimapInfoBar.textContent = "---";
+            minimapInfoBar.style.color = "#7b8b98";
+        }
     }
 
     function moveWorkspaceToMapPos(mx, my) {
@@ -885,7 +940,6 @@
         handle.addEventListener("pointermove", event => {
             if (!minimapDragState || minimapDragState.pointerId !== event.pointerId) return;
 
-            // わずかなブレ（4px以内）はクリックとみなすため、4px超の移動でドラッグ判定
             const dx = Math.abs(event.clientX - minimapDragState.startX);
             const dy = Math.abs(event.clientY - minimapDragState.startY);
             if (dx > 4 || dy > 4) {
@@ -909,7 +963,6 @@
             minimapDragState = null;
             try { handle.releasePointerCapture(event.pointerId); } catch (_) { }
 
-            // ★ ドラッグ移動していなかった場合のみ「クリック」と判定して開閉する
             if (!hasMoved) {
                 toggleMinimapCollapse();
             }
@@ -919,16 +972,17 @@
         handle.addEventListener("pointercancel", endDrag);
     }
 
-
     function toggleMinimapCollapse() {
         if (!minimapPanel || !minimapCanvas) return;
         minimapIsCollapsed = !minimapIsCollapsed;
 
         if (minimapIsCollapsed) {
             minimapCanvas.style.display = "none";
+            if (minimapInfoBar) minimapInfoBar.style.display = "none";
             stopMinimapLoop();
         } else {
             minimapCanvas.style.display = "block";
+            if (minimapInfoBar) minimapInfoBar.style.display = "flex";
             startMinimapLoop();
         }
     }
@@ -968,7 +1022,7 @@
         const header = document.createElement("div");
         header.style.cssText = [
             "height:28px", "background:#2b3440", "display:flex", "align-items:center",
-            "padding:0 10px", "font-size:13px", "font-weight:bold", "color:#fff",
+            "padding:0 8px 0 10px", "font-size:13px", "font-weight:bold", "color:#fff",
             "cursor:move"
         ].join(";");
         header.title = ja ? "ドラッグで移動 / クリックで折りたたみ・展開" : "Drag to move / Click to collapse or expand";
@@ -978,18 +1032,47 @@
         titleText.style.cssText = "flex:1;pointer-events:none;";
         header.appendChild(titleText);
 
+        // ★ 1x / 2x / 4x 切り替えボタン
+        const zoomBtn = document.createElement("button");
+        zoomBtn.type = "button";
+        zoomBtn.textContent = "1x";
+        zoomBtn.title = ja ? "拡大率の切り替え (1x / 2x / 4x)" : "Toggle Zoom (1x / 2x / 4x)";
+        zoomBtn.style.cssText = [
+            "height:20px", "padding:0 6px", "margin-right:8px", "background:#1e252e",
+            "border:1px solid #55dfff", "border-radius:3px", "color:#55dfff",
+            "font-size:11px", "font-weight:bold", "cursor:pointer", "line-height:18px"
+        ].join(";");
+        zoomBtn.onclick = (e) => {
+            e.stopPropagation();
+            minimapZoomIndex = (minimapZoomIndex + 1) % minimapZoomLevels.length;
+            zoomBtn.textContent = minimapZoomLevels[minimapZoomIndex] + "x";
+            renderMinimap();
+        };
+        header.appendChild(zoomBtn);
+        minimapZoomBtn = zoomBtn;
+
         const closeBtn = document.createElement("button");
         closeBtn.textContent = "✕";
         closeBtn.title = ja ? "完全に閉じる" : "Close";
-        closeBtn.style.cssText = "margin-left:auto;background:transparent;border:0;color:#aaa;cursor:pointer;font-size:16px;line-height:28px;padding:0 4px;";
+        closeBtn.style.cssText = "background:transparent;border:0;color:#aaa;cursor:pointer;font-size:16px;line-height:28px;padding:0 4px;";
         closeBtn.onclick = (e) => {
             e.stopPropagation();
             toggleMinimap(false);
         };
         header.appendChild(closeBtn);
 
-        // タイトルバーのドラッグ＆クリック判定を適用（ダブルクリックイベントは廃止）
         makeMinimapPanelDraggable(panel, header);
+
+        // ★ タイトル下のブロック名表示枠
+        const infoBar = document.createElement("div");
+        infoBar.style.cssText = [
+            "height:22px", "background:#171d24", "border-top:1px solid #333d4b",
+            "border-bottom:1px solid #333d4b", "display:flex", "align-items:center",
+            "padding:0 10px", "font-size:11px", "font-weight:bold", "color:#7b8b98",
+            "white-space:nowrap", "overflow:hidden", "text-overflow:ellipsis"
+        ].join(";");
+        infoBar.textContent = "---";
+        minimapInfoBar = infoBar;
 
         const canvas = document.createElement("canvas");
         canvas.width = 518;
@@ -1007,7 +1090,23 @@
             canvas.setPointerCapture(e.pointerId);
             handlePointer(e);
         });
-        canvas.addEventListener("pointermove", (e) => { if (isDragging) handlePointer(e); });
+        canvas.addEventListener("pointermove", (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            if (isDragging) {
+                handlePointer(e);
+            }
+            // ホバー時のブロック名更新
+            updateHoveredBlockInfo(mx, my);
+        });
+        canvas.addEventListener("pointerleave", () => {
+            if (minimapInfoBar) {
+                minimapInfoBar.textContent = "---";
+                minimapInfoBar.style.color = "#7b8b98";
+            }
+        });
         const stopDrag = (e) => {
             isDragging = false;
             try { canvas.releasePointerCapture(e.pointerId); } catch (_) { }
@@ -1033,6 +1132,7 @@
         }, { passive: false });
 
         panel.appendChild(header);
+        panel.appendChild(infoBar);
         panel.appendChild(canvas);
         document.body.appendChild(panel);
 
@@ -1049,22 +1149,13 @@
             if (minimapIsCollapsed) {
                 minimapIsCollapsed = false;
                 if (minimapCanvas) minimapCanvas.style.display = "block";
+                if (minimapInfoBar) minimapInfoBar.style.display = "flex";
             }
             startMinimapLoop();
         } else {
             stopMinimapLoop();
         }
     }
-
-    
-
-    function initScrollWheel() {
-        if (wheelListenerAttached) return;
-        // キャプチャフェーズで登録してBlocklyの既定ホイール処理より先に割り込む
-        window.addEventListener("wheel", handleWorkspaceWheel, { passive: false, capture: true });
-        wheelListenerAttached = true;
-    }
-
     function minimapMenuText() {
         return getPortalLanguage() === "ja" ? "全体マップで移動" : "Navigate with Minimap";
     }
