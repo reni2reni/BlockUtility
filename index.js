@@ -778,7 +778,7 @@
         }
 
         const singleWidth = Math.max(80, Math.min(1200, Math.round(baseWidth)));
-        return (singleWidth * singleWidth) / 80; // ルールブロック横幅を4倍
+        return (singleWidth * singleWidth) / 100; // ルールブロック横幅を4倍
     }
 
     function getRuleMapBounds(block) {
