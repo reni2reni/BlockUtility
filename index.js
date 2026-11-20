@@ -959,16 +959,18 @@
         closeBtn.textContent = "✕";
         closeBtn.title = ja ? "閉じる" : "Close";
         closeBtn.style.cssText = "margin-left:auto;background:transparent;border:0;color:#aaa;cursor:pointer;font-size:16px;line-height:28px;padding:0 4px;";
+
+        header.addEventListener("click", (e) => {
+            e.stopPropagation();
+            toggleMinimapCollapse();
+        });
+        
         closeBtn.onclick = (e) => {
             e.stopPropagation();
             toggleMinimap(false);
         };
         header.appendChild(closeBtn);
 
-        header.addEventListener("click", (e) => {
-            e.stopPropagation();
-            toggleMinimapCollapse();
-        });
 
         makeMinimapPanelDraggable(panel, header);
 
