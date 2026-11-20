@@ -832,7 +832,7 @@
 
         const header = document.createElement("div");
         header.style.cssText = "height:28px;background:#2b3440;display:flex;align-items:center;padding:0 10px;font-size:13px;font-weight:bold;color:#fff;";
-        header.textContent = ja ? "全体マップ (移動)" : "Minimap (Navigate)";
+        header.textContent = ja ? "全体マップ (移動)" : "Navigate with Minimap";
 
         const closeBtn = document.createElement("button");
         closeBtn.textContent = "✕";
@@ -840,12 +840,12 @@
         closeBtn.onclick = () => toggleMinimap(false);
         header.appendChild(closeBtn);
 
-        // 描画キャンバス（幅・高さを2倍に設定）
         const canvas = document.createElement("canvas");
         canvas.width = 518;
         canvas.height = 360;
         canvas.style.cssText = "background:#12161c;cursor:crosshair;display:block;width:518px;height:360px;";
 
+        // クリック / ドラッグ移動
         let isDragging = false;
         const handlePointer = (e) => {
             const rect = canvas.getBoundingClientRect();
@@ -865,6 +865,26 @@
         canvas.addEventListener("pointerup", stopDrag);
         canvas.addEventListener("pointercancel", stopDrag);
 
+        // ★ ミニマップ上でのホイール操作 → ブロック表示の拡大・縮小
+        canvas.addEventListener("wheel", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+            if (!ws) return;
+
+            // 奥へ回す(deltaY < 0): 拡大 / 手前へ回す(deltaY > 0): 縮小
+            const amount = e.deltaY < 0 ? 1 : -1;
+
+            if (typeof ws.zoomCenter === "function") {
+                ws.zoomCenter(amount);
+            } else if (typeof ws.setScale === "function") {
+                const factor = amount > 0 ? 1.1 : 0.9;
+                ws.setScale((ws.scale || 1) * factor);
+            }
+            renderMinimap();
+        }, { passive: false });
+
         panel.appendChild(header);
         panel.appendChild(canvas);
         document.body.appendChild(panel);
@@ -877,10 +897,7 @@
         createMinimapPanel();
         minimapIsOpen = typeof force === "boolean" ? force : !minimapIsOpen;
         minimapPanel.style.display = minimapIsOpen ? "flex" : "none";
-        if (minimapButton) {
-            minimapButton.style.borderColor = minimapIsOpen ? "#55dfff" : "#667381";
-            minimapButton.style.color = minimapIsOpen ? "#55dfff" : "#fff";
-        }
+
         if (minimapIsOpen) {
             const loop = () => {
                 renderMinimap();
@@ -1015,17 +1032,48 @@
         _Blockly.ContextMenuRegistry.registry.register(ruleNumberItem);
 
         menusRegistered = true;
+        function minimapMenuText() {
+            return getPortalLanguage() === "ja" ? "全体マップで移動" : "Navigate with Minimap";
+        }
+
+        // 既存の registerMenus() 内に追加
+        function registerMenus() {
+            if (menusRegistered) return;
+            const Scope = _Blockly.ContextMenuRegistry.ScopeType;
+
+            // --- (既存の subroutineItem, sourceItem, blockSearchItem 等) ---
+
+            // ★ ワークスペースの右クリックメニューに追加
+            const minimapWorkspaceItem = {
+                id: "blockUtilityMinimapWorkspace",
+                displayText: () => minimapMenuText(),
+                scopeType: Scope.WORKSPACE,
+                weight: 85,
+                preconditionFn: () => "enabled",
+                callback: () => {
+                    toggleMinimap(true);
+                }
+            };
+            plugin.registerItem(minimapWorkspaceItem);
+            _Blockly.ContextMenuRegistry.registry.register(minimapWorkspaceItem);
+
+            // ★ ブロック上の右クリックメニューにも追加
+            const minimapBlockItem = {
+                id: "blockUtilityMinimapBlock",
+                displayText: () => minimapMenuText(),
+                scopeType: Scope.BLOCK,
+                weight: 85,
+                preconditionFn: scope => scope && scope.block ? "enabled" : "hidden",
+                callback: () => {
+                    toggleMinimap(true);
+                }
+            };
+            plugin.registerItem(minimapBlockItem);
+            _Blockly.ContextMenuRegistry.registry.register(minimapBlockItem);
+
+            menusRegistered = true;
+        }
     }
 
-    plugin.initializeWorkspace = async function () {
-        try {
-            registerMenus();
-            initScrollWheel();
-            initMinimapButton(); // ← ここを追加
-        } catch (e) {
-            if (BF2042Portal.Shared && typeof BF2042Portal.Shared.logError === "function") {
-                BF2042Portal.Shared.logError("BlockUtility initialization", String(e));
-            }
-        }
-    };
+
 })();
