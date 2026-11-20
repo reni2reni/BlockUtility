@@ -1156,6 +1156,14 @@
             stopMinimapLoop();
         }
     }
+
+    function initScrollWheel() {
+        if (wheelListenerAttached) return;
+        // キャプチャフェーズで登録してBlocklyの既定ホイール処理より先に割り込む
+        window.addEventListener("wheel", handleWorkspaceWheel, { passive: false, capture: true });
+        wheelListenerAttached = true;
+    }
+
     function minimapMenuText() {
         return getPortalLanguage() === "ja" ? "全体マップで移動" : "Navigate with Minimap";
     }
