@@ -706,7 +706,6 @@
     let minimapPanel = null;
     let minimapCanvas = null;
     let minimapInfoBar = null;
-    let minimapZoomBtn = null;
     let minimapIsOpen = false;
     let minimapIsCollapsed = false;
     let minimapAnimId = null;
@@ -714,9 +713,7 @@
     let minimapFocusAnchor = null;
     let minimapAutoScrollId = null;
     let minimapEdgeDir = { x: 0, y: 0 };
-
-    const minimapZoomLevels = [1, 2, 4];
-    let minimapZoomIndex = 0; // 0: 1x, 1: 2x, 2: 4x
+    let minimapZoom = 1; // 1.0 〜 4.0（ホイールで無段階変更）
 
     function getWorkspaceBounds(ws) {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -769,13 +766,12 @@
         const mapH = mapMaxY - mapMinY;
 
         // 1x/2x/4x の倍率計算
-        const mult = minimapZoomLevels[minimapZoomIndex];
+        const mult = minimapZoom;
         const baseZoom = Math.min(cw / mapW, ch / mapH);
         const zoom = baseZoom * mult;
 
-        // 1x時は全体中央配置、2x/4x時は現在の視点中央をフォーカス
         let offX, offY;
-        if (mult === 1) {
+        if (Math.abs(mult - 1) < 0.001) {
             minimapFocusAnchor = null;
             offX = (cw - mapW * zoom) / 2;
             offY = (ch - mapH * zoom) / 2;
@@ -863,8 +859,7 @@
 
     function updateMinimapEdgeAutoScroll(mx, my) {
         if (!minimapCanvas) return;
-        const mult = minimapZoomLevels[minimapZoomIndex];
-        if (mult === 1) {
+        if (minimapZoom <= 1.001) {
             minimapEdgeDir.x = 0;
             minimapEdgeDir.y = 0;
             return;
@@ -1192,7 +1187,7 @@
             isDragging = true;
             const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
             const data = canvas._mapData;
-            if (ws && data && minimapZoomLevels[minimapZoomIndex] !== 1) {
+            if (ws && data && minimapZoom > 1.001) {
                 const scale = ws.scale || 1;
                 const curLeft = -(ws.scrollX || 0) / scale;
                 const curTop = -(ws.scrollY || 0) / scale;
@@ -1249,17 +1244,50 @@
             e.preventDefault();
             e.stopPropagation();
 
-            const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
-            if (!ws) return;
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            const data = canvas._mapData;
 
-            const amount = e.deltaY < 0 ? 1 : -1;
-            if (typeof ws.zoomCenter === "function") {
-                ws.zoomCenter(amount);
-            } else if (typeof ws.setScale === "function") {
-                const factor = amount > 0 ? 1.1 : 0.9;
-                ws.setScale((ws.scale || 1) * factor);
+            // ホイール前にカーソルが指していたワークスペース座標を保持
+            const focusWsX = data ? data.mapMinX + (mx - data.offX) / data.zoom : null;
+            const focusWsY = data ? data.mapMinY + (my - data.offY) / data.zoom : null;
+
+            // 1x 〜 4x で無段階変更
+            const stepFactor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+            minimapZoom = Math.max(1, Math.min(4, minimapZoom * stepFactor));
+
+            if (minimapZoom <= 1.001) {
+                minimapZoom = 1;
+                minimapFocusAnchor = null;
+            } else if (focusWsX != null && focusWsY != null && data) {
+                // カーソル位置がキャンバス上の同じ (mx, my) に留まるようアンカーを補正
+                const cw = canvas.width;
+                const ch = canvas.height;
+                const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
+                const inj = ws && ws.getInjectionDiv ? ws.getInjectionDiv() : document.body;
+                const viewW = inj ? (inj.clientWidth || 1000) : 1000;
+                const viewH = inj ? (inj.clientHeight || 800) : 800;
+                const b = ws ? getWorkspaceBounds(ws) : { minX: 0, minY: 0, maxX: 1000, maxY: 1000 };
+                const scale = (ws && ws.scale) || 1;
+                const curLeft = -((ws && ws.scrollX) || 0) / scale;
+                const curTop = -((ws && ws.scrollY) || 0) / scale;
+                const pad = 200;
+                const mapMinX = Math.min(b.minX, curLeft) - pad;
+                const mapMinY = Math.min(b.minY, curTop) - pad;
+                const mapMaxX = Math.max(b.maxX, curLeft + viewW / scale) + pad;
+                const mapMaxY = Math.max(b.maxY, curTop + viewH / scale) + pad;
+                const baseZoom = Math.min(cw / (mapMaxX - mapMinX), ch / (mapMaxY - mapMinY));
+                const nextZoom = baseZoom * minimapZoom;
+
+                minimapFocusAnchor = {
+                    x: focusWsX - (mx - cw / 2) / nextZoom,
+                    y: focusWsY - (my - ch / 2) / nextZoom
+                };
             }
+
             renderMinimap();
+            updateHoveredBlockInfo(mx, my);
         }, { passive: false });
 
         panel.appendChild(header);
