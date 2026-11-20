@@ -11,7 +11,9 @@
     let minimapPanel = null;
     let minimapCanvas = null;
     let minimapIsOpen = false;
+    let minimapIsCollapsed = false;
     let minimapAnimId = null;
+    let minimapDragState = null;
 
     function getPortalLanguage() {
         const candidates = [
@@ -707,6 +709,7 @@
     }
 
     // ===== 全体縮小ミニマップ =====
+
     function getWorkspaceBounds(ws) {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         const blocks = ws.getTopBlocks ? ws.getTopBlocks(false) : [];
@@ -729,7 +732,7 @@
     }
 
     function renderMinimap() {
-        if (!minimapIsOpen || !minimapCanvas) return;
+        if (!minimapIsOpen || minimapIsCollapsed || !minimapCanvas) return;
         const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
         if (!ws) return;
 
@@ -743,13 +746,11 @@
         const viewH = inj.clientHeight || 800;
         const scale = ws.scale || 1;
 
-        // 現在の画面表示範囲 (ワークスペース座標)
         const curLeft = -ws.scrollX / scale;
         const curTop = -ws.scrollY / scale;
         const curRight = curLeft + (viewW / scale);
         const curBottom = curTop + (viewH / scale);
 
-        // ブロック全体範囲と画面範囲を統合したマップの表示領域を決定
         const b = getWorkspaceBounds(ws);
         const pad = 200;
         const mapMinX = Math.min(b.minX, curLeft) - pad;
@@ -759,7 +760,6 @@
         const mapW = mapMaxX - mapMinX;
         const mapH = mapMaxY - mapMinY;
 
-        // 縮小率 (アスペクト比維持)
         const zoom = Math.min(cw / mapW, ch / mapH);
         const offX = (cw - mapW * zoom) / 2;
         const offY = (ch - mapH * zoom) / 2;
@@ -767,10 +767,8 @@
         const toMapX = (x) => offX + (x - mapMinX) * zoom;
         const toMapY = (y) => offY + (y - mapMinY) * zoom;
 
-        // キャッシュ（クリック判定用）
         minimapCanvas._mapData = { mapMinX, mapMinY, zoom, offX, offY, viewW, viewH, scale };
 
-        // 1. 各ブロックの簡易描画
         ctx.fillStyle = "rgba(85, 223, 255, 0.45)";
         for (const block of ws.getTopBlocks ? ws.getTopBlocks(false) : []) {
             const xy = block.getRelativeToSurfaceXY ? block.getRelativeToSurfaceXY() : { x: 0, y: 0 };
@@ -778,7 +776,6 @@
             ctx.fillRect(toMapX(xy.x), toMapY(xy.y), Math.max(3, hw.width * zoom), Math.max(3, hw.height * zoom));
         }
 
-        // 2. 現在の画面表示枠 (ビューポート) の描画
         const vx = toMapX(curLeft);
         const vy = toMapY(curTop);
         const vw = (viewW / scale) * zoom;
@@ -796,7 +793,6 @@
         const data = minimapCanvas && minimapCanvas._mapData;
         if (!ws || !data) return;
 
-        // ミニマップ座標からワークスペース中心座標へ変換
         const wsX = data.mapMinX + (mx - data.offX) / data.zoom;
         const wsY = data.mapMinY + (my - data.offY) / data.zoom;
 
@@ -817,6 +813,73 @@
         renderMinimap();
     }
 
+    // ドラッグ移動処理
+    function makeMinimapPanelDraggable(panel, handle) {
+        handle.addEventListener("pointerdown", event => {
+            if (event.button !== 0 || event.target.tagName === "BUTTON") return;
+            const rect = panel.getBoundingClientRect();
+            minimapDragState = {
+                pointerId: event.pointerId,
+                offsetX: event.clientX - rect.left,
+                offsetY: event.clientY - rect.top
+            };
+            handle.setPointerCapture(event.pointerId);
+            event.preventDefault();
+        });
+        handle.addEventListener("pointermove", event => {
+            if (!minimapDragState || minimapDragState.pointerId !== event.pointerId) return;
+            const left = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth,
+                event.clientX - minimapDragState.offsetX));
+            const top = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight,
+                event.clientY - minimapDragState.offsetY));
+            panel.style.left = left + "px";
+            panel.style.top = top + "px";
+            panel.style.right = "auto";
+        });
+        const endDrag = event => {
+            if (!minimapDragState || minimapDragState.pointerId !== event.pointerId) return;
+            minimapDragState = null;
+            try { handle.releasePointerCapture(event.pointerId); } catch (_) { }
+        };
+        handle.addEventListener("pointerup", endDrag);
+        handle.addEventListener("pointercancel", endDrag);
+    }
+
+    // 折りたたみ / 展開（ダブルクリック時）
+    function toggleMinimapCollapse() {
+        if (!minimapPanel || !minimapCanvas) return;
+        minimapIsCollapsed = !minimapIsCollapsed;
+
+        if (minimapIsCollapsed) {
+            // 折りたたみ: キャンバスを隠してループ停止（負荷ゼロ）
+            minimapCanvas.style.display = "none";
+            stopMinimapLoop();
+        } else {
+            // 展開: キャンバスを表示して描画ループ再開
+            minimapCanvas.style.display = "block";
+            startMinimapLoop();
+        }
+    }
+
+    function startMinimapLoop() {
+        stopMinimapLoop();
+        if (!minimapIsOpen || minimapIsCollapsed) return;
+        const loop = () => {
+            renderMinimap();
+            if (minimapIsOpen && !minimapIsCollapsed) {
+                minimapAnimId = requestAnimationFrame(loop);
+            }
+        };
+        loop();
+    }
+
+    function stopMinimapLoop() {
+        if (minimapAnimId) {
+            cancelAnimationFrame(minimapAnimId);
+            minimapAnimId = null;
+        }
+    }
+
     function createMinimapPanel() {
         if (minimapPanel) return;
         const ja = getPortalLanguage() === "ja";
@@ -831,21 +894,42 @@
         ].join(";");
 
         const header = document.createElement("div");
-        header.style.cssText = "height:28px;background:#2b3440;display:flex;align-items:center;padding:0 10px;font-size:13px;font-weight:bold;color:#fff;";
-        header.textContent = ja ? "全体マップ (移動)" : "Navigate with Minimap";
+        header.style.cssText = [
+            "height:28px", "background:#2b3440", "display:flex", "align-items:center",
+            "padding:0 10px", "font-size:13px", "font-weight:bold", "color:#fff",
+            "cursor:move"
+        ].join(";");
+        header.title = ja ? "ドラッグで移動 / ダブルクリックで折りたたみ" : "Drag to move / Double-click to collapse";
+
+        const titleText = document.createElement("span");
+        titleText.textContent = ja ? "全体マップ (移動)" : "Navigate with Minimap";
+        titleText.style.cssText = "flex:1;pointer-events:none;";
+        header.appendChild(titleText);
 
         const closeBtn = document.createElement("button");
         closeBtn.textContent = "✕";
+        closeBtn.title = ja ? "閉じる" : "Close";
         closeBtn.style.cssText = "margin-left:auto;background:transparent;border:0;color:#aaa;cursor:pointer;font-size:16px;line-height:28px;padding:0 4px;";
-        closeBtn.onclick = () => toggleMinimap(false);
+        closeBtn.onclick = (e) => {
+            e.stopPropagation();
+            toggleMinimap(false);
+        };
         header.appendChild(closeBtn);
+
+        // タイトルバーをダブルクリックで折りたたみ/展開
+        header.addEventListener("dblclick", (e) => {
+            e.stopPropagation();
+            toggleMinimapCollapse();
+        });
+
+        // ドラッグ移動を適用
+        makeMinimapPanelDraggable(panel, header);
 
         const canvas = document.createElement("canvas");
         canvas.width = 518;
         canvas.height = 360;
         canvas.style.cssText = "background:#12161c;cursor:crosshair;display:block;width:518px;height:360px;";
 
-        // クリック / ドラッグ移動
         let isDragging = false;
         const handlePointer = (e) => {
             const rect = canvas.getBoundingClientRect();
@@ -865,7 +949,7 @@
         canvas.addEventListener("pointerup", stopDrag);
         canvas.addEventListener("pointercancel", stopDrag);
 
-        // ★ ミニマップ上でのホイール操作 → ブロック表示の拡大・縮小
+        // ミニマップ上ホイールでブロック表示拡大・縮小
         canvas.addEventListener("wheel", (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -873,9 +957,7 @@
             const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
             if (!ws) return;
 
-            // 奥へ回す(deltaY < 0): 拡大 / 手前へ回す(deltaY > 0): 縮小
             const amount = e.deltaY < 0 ? 1 : -1;
-
             if (typeof ws.zoomCenter === "function") {
                 ws.zoomCenter(amount);
             } else if (typeof ws.setScale === "function") {
@@ -899,13 +981,14 @@
         minimapPanel.style.display = minimapIsOpen ? "flex" : "none";
 
         if (minimapIsOpen) {
-            const loop = () => {
-                renderMinimap();
-                if (minimapIsOpen) minimapAnimId = requestAnimationFrame(loop);
-            };
-            loop();
-        } else if (minimapAnimId) {
-            cancelAnimationFrame(minimapAnimId);
+            // 開いたときに折りたたまれていた場合は自動展開する
+            if (minimapIsCollapsed) {
+                minimapIsCollapsed = false;
+                if (minimapCanvas) minimapCanvas.style.display = "block";
+            }
+            startMinimapLoop();
+        } else {
+            stopMinimapLoop();
         }
     }
 
