@@ -771,8 +771,7 @@
         let baseWidth;
 
         if (childWidths.length > 0) {
-            const sum = childWidths.reduce((acc, w) => acc + w, 0);
-            baseWidth = sum / childWidths.length; // 子ブロック横幅の平均
+            baseWidth = Math.max(...childWidths); // 子ブロック横幅の最大値
         } else {
             baseWidth = fallbackWidth > 0 ? fallbackWidth : 120;
         }
