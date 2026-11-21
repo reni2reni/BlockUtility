@@ -1626,11 +1626,8 @@
         const data = minimapCanvas && minimapCanvas._mapData;
         if (!ws || !data) return;
 
-        const wsX = data.mapMinX + (mx - data.offX) / data.zoom;
-        const wsY = data.mapMinY + (my - data.offY) / data.zoom;
-
-        const marginRight = 50; // 右端からの余白 (px)
-        const marginTop = 50;   // 上端からの余白 (px)
+        let wsX = data.mapMinX + (mx - data.offX) / data.zoom;
+        let wsY = data.mapMinY + (my - data.offY) / data.zoom;
 
         let targetScrollX;
         let targetScrollY;
@@ -1639,24 +1636,8 @@
             const targetBlock = findBlockAtWorkspacePos(ws, wsX, wsY);
             if (targetBlock && typeof targetBlock.getRelativeToSurfaceXY === "function") {
                 const xy = targetBlock.getRelativeToSurfaceXY();
-                let blockWidth = 120;
-
-                if (targetBlock.type === "ruleBlock") {
-                    blockWidth = getRuleMapBounds(targetBlock).width;
-                } else if (typeof targetBlock.getHeightWidth === "function") {
-                    try {
-                        const hw = targetBlock.getHeightWidth();
-                        if (hw && Number.isFinite(hw.width) && hw.width > 0) blockWidth = hw.width;
-                    } catch (_) { }
-                }
-
-                // ブロックの右上角 (xy.x + blockWidth, xy.y) が
-                // ビューポートの (viewW - 50, 50) に来るようにスクロール量を計算
-                const targetWsRight = Number(xy.x) + blockWidth;
-                const targetWsTop = Number(xy.y);
-
-                targetScrollX = (data.viewW - marginRight) - (targetWsRight * data.scale);
-                targetScrollY = marginTop - (targetWsTop * data.scale);
+                targetScrollX = -(xy.x * data.scale) + 50;
+                targetScrollY = -(xy.y * data.scale) + 50;
             } else {
                 targetScrollX = -(wsX * data.scale) + (data.viewW / 2);
                 targetScrollY = -(wsY * data.scale) + (data.viewH / 2);
@@ -1665,7 +1646,6 @@
             targetScrollX = -(wsX * data.scale) + (data.viewW / 2);
             targetScrollY = -(wsY * data.scale) + (data.viewH / 2);
         }
-
         ws.scrollX = targetScrollX;
         ws.scrollY = targetScrollY;
 
