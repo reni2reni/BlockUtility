@@ -10,6 +10,7 @@
     let minimapButton = null;
     let searchButton = null;
     let searchButtonResizeObserver = null;
+    let searchButtonMutationObserver = null; // ★これを追加
 
     function getPortalLanguage() {
         const candidates = [
