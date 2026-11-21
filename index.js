@@ -889,6 +889,33 @@
         return maxRight > 0 ? maxRight : hostRect.left;
     }
 
+    let searchButtonRafId = null;
+    let jaButtonStyleObserver = null;
+
+    function scheduleSearchButtonPositionUpdate() {
+        if (searchButtonRafId) return;
+        searchButtonRafId = requestAnimationFrame(() => {
+            searchButtonRafId = null;
+            updateSearchButtonPosition();
+        });
+    }
+
+    function bindJaButtonStyleObserver(jaBtn) {
+        if (!jaBtn || typeof MutationObserver === "undefined") return;
+        if (jaButtonStyleObserver && jaButtonStyleObserver._target === jaBtn) return;
+        if (jaButtonStyleObserver) {
+            jaButtonStyleObserver.disconnect();
+        }
+        jaButtonStyleObserver = new MutationObserver(() => {
+            scheduleSearchButtonPositionUpdate();
+        });
+        jaButtonStyleObserver.observe(jaBtn, {
+            attributes: true,
+            attributeFilter: ["style", "class"]
+        });
+        jaButtonStyleObserver._target = jaBtn;
+    }
+
     function updateSearchButtonPosition() {
         if (!searchButton) return;
         const host = getBlockUtilityHost();
@@ -911,12 +938,11 @@
         let anchorTop = 10;
 
         if (jaBtn) {
-            // 日本語化ボタンが存在する場合はその右隣に並べる
+            bindJaButtonStyleObserver(jaBtn);
             const jaRect = jaBtn.getBoundingClientRect();
             anchorRight = jaRect.right;
             anchorTop = Math.round(jaRect.top - hostRect.top);
         } else {
-            // 日本語化ボタンがない場合はブロック一覧の右隣に配置
             anchorRight = getBlockListRightEdgeForSearch(host);
         }
 
@@ -933,17 +959,36 @@
 
     function bindSearchButtonResizeObserver() {
         const host = getBlockUtilityHost();
-        if (!host || typeof ResizeObserver === "undefined") return;
-        if (searchButtonResizeObserver) {
-            searchButtonResizeObserver.disconnect();
+        if (!host) return;
+
+        if (typeof ResizeObserver !== "undefined") {
+            if (searchButtonResizeObserver) {
+                searchButtonResizeObserver.disconnect();
+            }
+            searchButtonResizeObserver = new ResizeObserver(() => {
+                scheduleSearchButtonPositionUpdate();
+            });
+            searchButtonResizeObserver.observe(host);
+            host.querySelectorAll(".blocklyToolboxDiv, .blocklyFlyout").forEach(el => {
+                searchButtonResizeObserver.observe(el);
+            });
         }
-        searchButtonResizeObserver = new ResizeObserver(() => {
-            updateSearchButtonPosition();
+
+        if (searchButtonMutationObserver) {
+            searchButtonMutationObserver.disconnect();
+        }
+        searchButtonMutationObserver = new MutationObserver(() => {
+            scheduleSearchButtonPositionUpdate();
         });
-        searchButtonResizeObserver.observe(host);
-        host.querySelectorAll(".blocklyToolboxDiv, .blocklyFlyout").forEach(el => {
-            searchButtonResizeObserver.observe(el);
+        searchButtonMutationObserver.observe(host, {
+            attributes: true,
+            attributeFilter: ["style", "class"],
+            childList: true,
+            subtree: true
         });
+
+        const jaBtn = getJapaneseToggleButton(host);
+        if (jaBtn) bindJaButtonStyleObserver(jaBtn);
     }
 
     function ensureSearchButton() {
@@ -1937,7 +1982,7 @@
             initScrollWheel();
             startFontControlMonitor();
             ensureSearchButton();
-            window.addEventListener("resize", updateSearchButtonPosition, { passive: true });
+            window.addEventListener("resize", scheduleSearchButtonPositionUpdate, { passive: true });
             setTimeout(updateSearchButtonPosition, 200);
 
         } catch (e) {
@@ -1951,14 +1996,14 @@
         // プラグインOFF時にフォント設定・バーを完全消去してデフォルト表示に戻す
         stopFontControlMonitor();
 
-        window.removeEventListener("resize", updateSearchButtonPosition);
-        if (searchButtonResizeObserver) {
-            searchButtonResizeObserver.disconnect();
-            searchButtonResizeObserver = null;
+        window.removeEventListener("resize", scheduleSearchButtonPositionUpdate);
+        if (searchButtonRafId) {
+            cancelAnimationFrame(searchButtonRafId);
+            searchButtonRafId = null;
         }
-        if (searchButton) {
-            searchButton.remove();
-            searchButton = null;
+        if (jaButtonStyleObserver) {
+            jaButtonStyleObserver.disconnect();
+            jaButtonStyleObserver = null;
         }
 
     };
