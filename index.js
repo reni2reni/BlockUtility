@@ -8,6 +8,8 @@
     let wheelListenerAttached = false;
     let fontControlTimer = null;
     let minimapButton = null;
+    let searchButton = null;
+    let searchButtonResizeObserver = null;
 
     function getPortalLanguage() {
         const candidates = [
@@ -822,6 +824,181 @@
         return getPortalLanguage() === "ja" ? "ブロック検索" : "Block Search";
     }
 
+    function blockSearchText() {
+        return getPortalLanguage() === "ja" ? "ブロック検索" : "Block Search";
+    }
+
+    // ★ここから追加（2）★
+    function getBlockUtilityHost() {
+        const ws = _Blockly && _Blockly.getMainWorkspace ? _Blockly.getMainWorkspace() : null;
+        return (ws && typeof ws.getInjectionDiv === "function" ? ws.getInjectionDiv() : null)
+            || document.querySelector(".blocklyInjectionDiv")
+            || null;
+    }
+
+    function getJapaneseToggleButton(host) {
+        if (!host) return null;
+        const btn = host.querySelector('[data-japanese-plugin="top-right-toggle"]');
+        if (!btn) return null;
+        const style = getComputedStyle(btn);
+        const rect = btn.getBoundingClientRect();
+        if (style.display === "none" || style.visibility === "hidden" || rect.width <= 0 || rect.height <= 0) {
+            return null;
+        }
+        return btn;
+    }
+
+    function getBlockListRightEdgeForSearch(host) {
+        const hostRect = host.getBoundingClientRect();
+        const selectors = [
+            ".blocklyToolboxDiv",
+            ".blocklyFlyout",
+            '[class*="toolbox" i]',
+            '[class*="flyout" i]'
+        ];
+        let maxRight = 0;
+
+        for (const sel of selectors) {
+            for (const el of host.querySelectorAll(sel)) {
+                if (el === searchButton || el.contains(searchButton)) continue;
+                const style = getComputedStyle(el);
+                if (style.display === "none" || style.visibility === "hidden" || parseFloat(style.opacity) === 0) continue;
+
+                const rect = el.getBoundingClientRect();
+                if (rect.width >= 40 && rect.height >= 100 && rect.left < hostRect.left + hostRect.width * 0.6) {
+                    maxRight = Math.max(maxRight, rect.right);
+                }
+            }
+        }
+
+        return maxRight > 0 ? maxRight : hostRect.left;
+    }
+
+    function updateSearchButtonPosition() {
+        if (!searchButton) return;
+        const host = getBlockUtilityHost();
+        if (!host) {
+            searchButton.style.display = "none";
+            return;
+        }
+        if (searchButton.parentElement !== host) {
+            host.appendChild(searchButton);
+        }
+
+        const hostRect = host.getBoundingClientRect();
+        if (hostRect.width <= 0 || hostRect.height <= 0) {
+            searchButton.style.display = "none";
+            return;
+        }
+
+        const jaBtn = getJapaneseToggleButton(host);
+        let anchorRight;
+        let anchorTop = 10;
+
+        if (jaBtn) {
+            // 日本語化ボタンが存在する場合はその右隣に並べる
+            const jaRect = jaBtn.getBoundingClientRect();
+            anchorRight = jaRect.right;
+            anchorTop = Math.round(jaRect.top - hostRect.top);
+        } else {
+            // 日本語化ボタンがない場合はブロック一覧の右隣に配置
+            anchorRight = getBlockListRightEdgeForSearch(host);
+        }
+
+        const btnWidth = searchButton.offsetWidth || 34;
+        let desiredLeft = Math.round(anchorRight - hostRect.left + 8);
+        const maxLeft = Math.max(10, Math.round(hostRect.width - btnWidth - 10));
+        desiredLeft = Math.max(10, Math.min(maxLeft, desiredLeft));
+
+        searchButton.style.display = "flex";
+        searchButton.style.top = `${Math.max(6, anchorTop)}px`;
+        searchButton.style.left = `${desiredLeft}px`;
+        searchButton.style.right = "auto";
+    }
+
+    function bindSearchButtonResizeObserver() {
+        const host = getBlockUtilityHost();
+        if (!host || typeof ResizeObserver === "undefined") return;
+        if (searchButtonResizeObserver) {
+            searchButtonResizeObserver.disconnect();
+        }
+        searchButtonResizeObserver = new ResizeObserver(() => {
+            updateSearchButtonPosition();
+        });
+        searchButtonResizeObserver.observe(host);
+        host.querySelectorAll(".blocklyToolboxDiv, .blocklyFlyout").forEach(el => {
+            searchButtonResizeObserver.observe(el);
+        });
+    }
+
+    function ensureSearchButton() {
+        const host = getBlockUtilityHost();
+        if (!host) return;
+
+        if (!searchButton) {
+            const ja = getPortalLanguage() === "ja";
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.id = "bf6-block-search-toggle-btn";
+            btn.title = ja ? "ブロック検索を開く" : "Open Block Search";
+            // 虫眼鏡アイコン
+            btn.innerHTML = `
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" stroke-width="2.1"/>
+                    <path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+                </svg>
+            `;
+            btn.style.cssText = [
+                "position:absolute",
+                "top:10px",
+                "left:10px",
+                "z-index:95",
+                "width:34px",
+                "height:34px",
+                "padding:0",
+                "border-radius:6px",
+                "border:1.5px solid #55dfff",
+                "background:rgba(20,34,42,0.92)",
+                "color:#55dfff",
+                "display:flex",
+                "align-items:center",
+                "justify-content:center",
+                "cursor:pointer",
+                "box-shadow:0 2px 8px rgba(0,0,0,0.45)",
+                "transition:background 0.15s ease,color 0.15s ease"
+            ].join(";");
+
+            btn.addEventListener("mouseenter", () => {
+                btn.style.background = "rgba(28,100,117,0.95)";
+                btn.style.color = "#ffffff";
+            });
+            btn.addEventListener("mouseleave", () => {
+                btn.style.background = "rgba(20,34,42,0.92)";
+                btn.style.color = "#55dfff";
+            });
+            btn.addEventListener("click", event => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (blockSearchPanel && blockSearchPanel.style.display !== "none") {
+                    blockSearchPanel.style.display = "none";
+                    removeBlockSearchHighlight();
+                } else {
+                    const ws = _Blockly && _Blockly.getMainWorkspace ? _Blockly.getMainWorkspace() : null;
+                    const selected = ws && typeof ws.getSelected === "function" ? ws.getSelected() : null;
+                    openBlockSearch(selected || null);
+                }
+            }, true);
+
+            searchButton = btn;
+        }
+
+        if (searchButton.parentElement !== host) {
+            host.appendChild(searchButton);
+        }
+        bindSearchButtonResizeObserver();
+        updateSearchButtonPosition();
+    }
+    // ★ここまで追加（2）★
     // ===== マウスホイールによるスクロール処理 =====
     function handleWorkspaceWheel(event) {
         const isShift = event.shiftKey;
@@ -1744,6 +1921,10 @@
             registerMenus();
             initScrollWheel();
             startFontControlMonitor();
+            ensureSearchButton();
+            window.addEventListener("resize", updateSearchButtonPosition, { passive: true });
+            setTimeout(updateSearchButtonPosition, 200);
+
         } catch (e) {
             if (BF2042Portal.Shared && typeof BF2042Portal.Shared.logError === "function") {
                 BF2042Portal.Shared.logError("BlockUtility initialization", String(e));
@@ -1755,20 +1936,15 @@
         // プラグインOFF時にフォント設定・バーを完全消去してデフォルト表示に戻す
         stopFontControlMonitor();
 
-        if (minimapPanel) {
-            stopMinimapLoop();
-            minimapPanel.remove();
-            minimapPanel = null;
-            minimapCanvas = null;
-            minimapInfoBar = null;
-            minimapIsOpen = false;
+        window.removeEventListener("resize", updateSearchButtonPosition);
+        if (searchButtonResizeObserver) {
+            searchButtonResizeObserver.disconnect();
+            searchButtonResizeObserver = null;
         }
-        if (blockSearchPanel) {
-            removeBlockSearchHighlight();
-            blockSearchPanel.remove();
-            blockSearchPanel = null;
-            blockSearchInput = null;
-            blockSearchResult = null;
+        if (searchButton) {
+            searchButton.remove();
+            searchButton = null;
         }
+
     };
 })();
