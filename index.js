@@ -848,6 +848,22 @@
         return btn;
     }
 
+    function isElementActuallyVisibleForSearch(el, hostRect) {
+        if (!el || !el.isConnected) return false;
+        const style = getComputedStyle(el);
+        if (
+            style.display === "none" ||
+            style.visibility === "hidden" ||
+            parseFloat(style.opacity) === 0
+        ) {
+            return false;
+        }
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 20 || rect.height < 40) return false;
+        if (rect.right <= hostRect.left || rect.left >= hostRect.right) return false;
+        return true;
+    }
+
     function getBlockListRightEdgeForSearch(host) {
         const hostRect = host.getBoundingClientRect();
         const selectors = [
@@ -861,11 +877,10 @@
         for (const sel of selectors) {
             for (const el of host.querySelectorAll(sel)) {
                 if (el === searchButton || el.contains(searchButton)) continue;
-                const style = getComputedStyle(el);
-                if (style.display === "none" || style.visibility === "hidden" || parseFloat(style.opacity) === 0) continue;
+                if (!isElementActuallyVisibleForSearch(el, hostRect)) continue;
 
                 const rect = el.getBoundingClientRect();
-                if (rect.width >= 40 && rect.height >= 100 && rect.left < hostRect.left + hostRect.width * 0.6) {
+                if (rect.left < hostRect.left + hostRect.width * 0.6) {
                     maxRight = Math.max(maxRight, rect.right);
                 }
             }
