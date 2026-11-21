@@ -199,10 +199,32 @@
             clearInterval(fontControlTimer);
             fontControlTimer = null;
         }
+
+        // コントローラーバーと追加スタイルの削除
         const bar = document.getElementById("bf6-toolbox-font-control-bar");
         if (bar) bar.remove();
         const style = document.getElementById("bf6-toolbox-font-style");
         if (style) style.remove();
+
+        // DOM要素に付与されたインラインスタイルをすべて消去してページデフォルトに戻す
+        try {
+            const items = document.querySelectorAll('.blocklyToolboxDiv [role="treeitem"], .blocklyToolboxDiv .blocklyTreeRow, .blocklyToolboxDiv .blocklyTreeLabel, .blocklyToolboxDiv .blocklyTreeIcon');
+            items.forEach(el => {
+                el.style.removeProperty("height");
+                el.style.removeProperty("min-height");
+                el.style.removeProperty("max-height");
+                el.style.removeProperty("line-height");
+                el.style.removeProperty("padding-top");
+                el.style.removeProperty("padding-bottom");
+                el.style.removeProperty("font-size");
+                el.style.removeProperty("width");
+            });
+        } catch (_) { }
+
+        // ワークスペースの再描画・再計算
+        const ws = _Blockly && _Blockly.getMainWorkspace ? _Blockly.getMainWorkspace() : null;
+        if (ws && typeof ws.resize === "function") ws.resize();
+        window.dispatchEvent(new Event("resize"));
     }
 
     // ===== サブルーチン関連処理 =====
@@ -977,7 +999,7 @@
             height
         };
     }
-    
+
     function getWorkspaceBounds(ws) {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         const blocks = ws.getTopBlocks ? ws.getTopBlocks(false) : [];
@@ -1730,7 +1752,9 @@
     };
 
     plugin.dispose = function () {
+        // プラグインOFF時にフォント設定・バーを完全消去してデフォルト表示に戻す
         stopFontControlMonitor();
+
         if (minimapPanel) {
             stopMinimapLoop();
             minimapPanel.remove();
