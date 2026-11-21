@@ -1739,11 +1739,92 @@
         menusRegistered = true;
     }
 
+    // ===== 上部ヘッダー（Battlefield表示・右リンクメニュー）のスリム化 =====
+    function applyCompactHeaderStyle(enabled) {
+        const STYLE_ID = "bf6-compact-header-style";
+        let style = document.getElementById(STYLE_ID);
+
+        if (!enabled) {
+            if (style) style.remove();
+            window.dispatchEvent(new Event("resize"));
+            return;
+        }
+
+        if (!style) {
+            style = document.createElement("style");
+            style.id = STYLE_ID;
+            document.head.appendChild(style);
+        }
+
+        style.textContent = `
+          /* ヘッダー全体の高さをギュッとスリム化 */
+          header,
+          nav.custom-navbar,
+          div[role="banner"],
+          header > div,
+          nav[class*="header"] {
+            min-height: 34px !important;
+            height: 34px !important;
+            padding-top: 0px !important;
+            padding-bottom: 0px !important;
+            margin-bottom: 0px !important;
+          }
+
+          /* 左側の Battlefield 表示・ロゴの小型化 */
+          header h1,
+          header [class*="title"],
+          header [class*="logo"],
+          header [class*="brand"],
+          header span {
+            font-size: 13px !important;
+            line-height: 34px !important;
+          }
+
+          header img,
+          header svg {
+            max-height: 18px !important;
+            width: auto !important;
+          }
+
+          /* 右側のリンクメニュー・ナビゲーションボタンの文字を小さく */
+          header a,
+          header button,
+          header nav,
+          header ul,
+          header li,
+          header [role="link"],
+          header [role="menuitem"],
+          header [class*="link"],
+          header [class*="menu"] {
+            font-size: 11px !important;
+            line-height: 32px !important;
+            padding-top: 0px !important;
+            padding-bottom: 0px !important;
+            padding-left: 6px !important;
+            padding-right: 6px !important;
+          }
+
+          /* ワークスペースが上に広がった分のレイアウト調整 */
+          .blocklySvg,
+          .injectionDiv {
+            top: 0 !important;
+          }
+        `;
+
+        // ワークスペースのサイズを即座に再計算して広げる
+        setTimeout(() => {
+            const ws = _Blockly && _Blockly.getMainWorkspace ? _Blockly.getMainWorkspace() : null;
+            if (ws && typeof ws.resize === "function") ws.resize();
+            window.dispatchEvent(new Event("resize"));
+        }, 100);
+    }
+
     plugin.initializeWorkspace = async function () {
         try {
             registerMenus();
             initScrollWheel();
             startFontControlMonitor();
+            applyCompactHeaderStyle(true); // ← ヘッダーの小型化を適用
         } catch (e) {
             if (BF2042Portal.Shared && typeof BF2042Portal.Shared.logError === "function") {
                 BF2042Portal.Shared.logError("BlockUtility initialization", String(e));
@@ -1752,8 +1833,8 @@
     };
 
     plugin.dispose = function () {
-        // プラグインOFF時にフォント設定・バーを完全消去してデフォルト表示に戻す
         stopFontControlMonitor();
+        applyCompactHeaderStyle(false); // ← プラグインOFF時は元の通常サイズに復帰
 
         if (minimapPanel) {
             stopMinimapLoop();
