@@ -877,7 +877,10 @@
 
         for (const sel of selectors) {
             for (const el of host.querySelectorAll(sel)) {
-                if (el === searchButton || el.contains(searchButton)) continue;
+                if (
+                    el === searchButton || el.contains(searchButton) ||
+                    el === minimapButton || (minimapButton && el.contains(minimapButton))
+                ) continue;
                 if (!isElementActuallyVisibleForSearch(el, hostRect)) continue;
 
                 const rect = el.getBoundingClientRect();
@@ -918,19 +921,24 @@
     }
 
     function updateSearchButtonPosition() {
-        if (!searchButton) return;
+        if (!searchButton && !minimapButton) return;
         const host = getBlockUtilityHost();
         if (!host) {
-            searchButton.style.display = "none";
+            if (searchButton) searchButton.style.display = "none";
+            if (minimapButton) minimapButton.style.display = "none";
             return;
         }
-        if (searchButton.parentElement !== host) {
+        if (searchButton && searchButton.parentElement !== host) {
             host.appendChild(searchButton);
+        }
+        if (minimapButton && minimapButton.parentElement !== host) {
+            host.appendChild(minimapButton);
         }
 
         const hostRect = host.getBoundingClientRect();
         if (hostRect.width <= 0 || hostRect.height <= 0) {
-            searchButton.style.display = "none";
+            if (searchButton) searchButton.style.display = "none";
+            if (minimapButton) minimapButton.style.display = "none";
             return;
         }
 
@@ -947,15 +955,30 @@
             anchorRight = getBlockListRightEdgeForSearch(host);
         }
 
-        const btnWidth = searchButton.offsetWidth || 34;
-        let desiredLeft = Math.round(anchorRight - hostRect.left + 8);
-        const maxLeft = Math.max(10, Math.round(hostRect.width - btnWidth - 10));
+        const topPx = Math.max(6, anchorTop);
+        const searchWidth = searchButton ? (searchButton.offsetWidth || 34) : 0;
+        const minimapWidth = minimapButton ? (minimapButton.offsetWidth || 34) : 0;
+        const gap = 8;
+        const totalWidth = searchWidth + (searchButton && minimapButton ? gap : 0) + minimapWidth;
+
+        let desiredLeft = Math.round(anchorRight - hostRect.left + gap);
+        const maxLeft = Math.max(10, Math.round(hostRect.width - totalWidth - 10));
         desiredLeft = Math.max(10, Math.min(maxLeft, desiredLeft));
 
-        searchButton.style.display = "flex";
-        searchButton.style.top = `${Math.max(6, anchorTop)}px`;
-        searchButton.style.left = `${desiredLeft}px`;
-        searchButton.style.right = "auto";
+        if (searchButton) {
+            searchButton.style.display = "flex";
+            searchButton.style.top = `${topPx}px`;
+            searchButton.style.left = `${desiredLeft}px`;
+            searchButton.style.right = "auto";
+        }
+
+        if (minimapButton) {
+            const mapLeft = searchButton ? (desiredLeft + searchWidth + gap) : desiredLeft;
+            minimapButton.style.display = "flex";
+            minimapButton.style.top = `${topPx}px`;
+            minimapButton.style.left = `${mapLeft}px`;
+            minimapButton.style.right = "auto";
+        }
     }
 
     function bindSearchButtonResizeObserver() {
@@ -1059,6 +1082,78 @@
         bindSearchButtonResizeObserver();
         updateSearchButtonPosition();
     }
+
+    function updateMinimapButtonUI() {
+        if (!minimapButton) return;
+        const ja = getPortalLanguage() === "ja";
+        minimapButton.title = minimapIsOpen
+            ? (ja ? "全体マップを閉じる" : "Close Minimap")
+            : (ja ? "全体マップを開く" : "Open Minimap");
+        minimapButton.style.borderColor = minimapIsOpen ? "#ff85c8" : "#55dfff";
+        minimapButton.style.color = minimapIsOpen ? "#ff85c8" : "#55dfff";
+        minimapButton.style.background = minimapIsOpen
+            ? "rgba(56,24,42,0.94)"
+            : "rgba(20,34,42,0.92)";
+    }
+
+    function ensureMinimapButton() {
+        const host = getBlockUtilityHost();
+        if (!host) return;
+
+        if (!minimapButton) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.id = "bf6-minimap-toggle-btn";
+            // 折りたたみマップ風のSVGアイコン
+            btn.innerHTML = `
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M3 6.5L9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20V6.5z" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
+                    <path d="M9 4v13.5M15 6.5V20" stroke="currentColor" stroke-width="1.7"/>
+                </svg>
+            `;
+            btn.style.cssText = [
+                "position:absolute",
+                "top:10px",
+                "left:10px",
+                "z-index:95",
+                "width:34px",
+                "height:34px",
+                "padding:0",
+                "border-radius:6px",
+                "border:1.5px solid #55dfff",
+                "background:rgba(20,34,42,0.92)",
+                "color:#55dfff",
+                "display:flex",
+                "align-items:center",
+                "justify-content:center",
+                "cursor:pointer",
+                "box-shadow:0 2px 8px rgba(0,0,0,0.45)",
+                "transition:background 0.15s ease,color 0.15s ease,border-color 0.15s ease"
+            ].join(";");
+
+            btn.addEventListener("mouseenter", () => {
+                btn.style.background = minimapIsOpen ? "rgba(84,32,62,0.96)" : "rgba(28,100,117,0.95)";
+                btn.style.color = "#ffffff";
+            });
+            btn.addEventListener("mouseleave", () => {
+                updateMinimapButtonUI();
+            });
+            btn.addEventListener("click", event => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleMinimap();
+            }, true);
+
+            minimapButton = btn;
+            updateMinimapButtonUI();
+        }
+
+        if (minimapButton.parentElement !== host) {
+            host.appendChild(minimapButton);
+        }
+        updateSearchButtonPosition();
+    }
+
     // ★ここまで追加（2）★
     // ===== マウスホイールによるスクロール処理 =====
     function handleWorkspaceWheel(event) {
@@ -1862,7 +1957,10 @@
         } else {
             stopMinimapLoop();
         }
+        updateMinimapButtonUI(); // ★この1行を追加
     }
+        
+
 
     function initScrollWheel() {
         if (wheelListenerAttached) return;
@@ -1983,6 +2081,7 @@
             initScrollWheel();
             startFontControlMonitor();
             ensureSearchButton();
+            ensureMinimapButton();
             window.addEventListener("resize", scheduleSearchButtonPositionUpdate, { passive: true });
             setTimeout(updateSearchButtonPosition, 200);
 
@@ -2007,5 +2106,10 @@
             jaButtonStyleObserver = null;
         }
 
+        // ★ ここにそのまま入れる ★
+        if (minimapButton) {
+            minimapButton.remove();
+            minimapButton = null;
+        }
     };
 })();
