@@ -6,7 +6,7 @@
     const plugin = BF2042Portal.Plugins.getPlugin("BlockUtility");
     let menusRegistered = false;
     let wheelListenerAttached = false;
-    // ===== ミニマップ関連変数 =====
+    let fontControlTimer = null;
     let minimapButton = null;
 
     function getPortalLanguage() {
@@ -18,6 +18,194 @@
         return lang.toLowerCase().startsWith("ja") ? "ja" : "en";
     }
 
+    // ===== 左側ブロックメニュー（Toolbox）の文字サイズ＆行高管理 =====
+    const TOOLBOX_FONT_SIZES = [10, 15, 20, 25];
+
+    function getToolboxFontSize() {
+        try {
+            const val = parseInt(localStorage.getItem("bf6-toolbox-font-size"), 10);
+            return Number.isFinite(val) ? Math.max(10, Math.min(25, val)) : 15;
+        } catch (_) {
+            return 15;
+        }
+    }
+
+    function setToolboxFontSize(size) {
+        const clamped = Math.max(10, Math.min(25, size));
+        try { localStorage.setItem("bf6-toolbox-font-size", String(clamped)); } catch (_) { }
+        applyToolboxFontSize(clamped);
+        return clamped;
+    }
+
+    function applyToolboxFontSize(size) {
+        let style = document.getElementById("bf6-toolbox-font-style");
+        if (!style) {
+            style = document.createElement("style");
+            style.id = "bf6-toolbox-font-style";
+            document.head.appendChild(style);
+        }
+
+        let rowHeight = 24;
+        let padY = 2;
+        if (size <= 10) { rowHeight = 18; padY = 1; }
+        else if (size <= 15) { rowHeight = 23; padY = 2; }
+        else if (size <= 20) { rowHeight = 28; padY = 2; }
+        else { rowHeight = 34; padY = 3; }
+
+        const iconSize = Math.max(10, Math.min(18, size - 2));
+
+        style.textContent = `
+          .blocklyToolboxDiv {
+            padding-top: 0px !important;
+          }
+          #bf6-toolbox-font-control-bar {
+            margin-top: 0px !important;
+            top: 0px !important;
+          }
+          .blocklyToolboxDiv,
+          .blocklyToolboxDiv * {
+            box-sizing: border-box !important;
+          }
+          .blocklyToolboxDiv [role="treeitem"],
+          .blocklyToolboxDiv .blocklyTreeRow,
+          .blocklyToolboxDiv .blocklyToolboxCategory,
+          .blocklyToolboxDiv .blocklyToolboxItem,
+          .blocklyToolboxDiv .blocklyTreeRowContentContainer {
+            height: ${rowHeight}px !important;
+            min-height: ${rowHeight}px !important;
+            max-height: ${rowHeight}px !important;
+            line-height: ${rowHeight}px !important;
+            padding-top: ${padY}px !important;
+            padding-bottom: ${padY}px !important;
+            margin-top: 0px !important;
+            margin-bottom: 0px !important;
+            display: flex !important;
+            align-items: center !important;
+          }
+          .blocklyToolboxDiv .blocklyTreeLabel {
+            font-size: ${size}px !important;
+            line-height: ${rowHeight}px !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+          .blocklyToolboxDiv .blocklyTreeIcon {
+            width: ${iconSize}px !important;
+            height: ${iconSize}px !important;
+            min-width: ${iconSize}px !important;
+            max-height: ${iconSize}px !important;
+            margin-right: 5px !important;
+            padding: 0 !important;
+          }
+          .blocklyToolboxDiv .blocklyTreeSeparator {
+            margin: 1px 0 !important;
+            height: 1px !important;
+          }
+        `;
+
+        try {
+            const items = document.querySelectorAll('.blocklyToolboxDiv [role="treeitem"], .blocklyToolboxDiv .blocklyTreeRow');
+            items.forEach(el => {
+                el.style.setProperty("height", rowHeight + "px", "important");
+                el.style.setProperty("min-height", rowHeight + "px", "important");
+                el.style.setProperty("max-height", rowHeight + "px", "important");
+                el.style.setProperty("padding-top", padY + "px", "important");
+                el.style.setProperty("padding-bottom", padY + "px", "important");
+            });
+        } catch (_) { }
+    }
+
+    function initToolboxFontControl() {
+        const tb = document.querySelector(".blocklyToolboxDiv");
+        if (!tb || document.getElementById("bf6-toolbox-font-control-bar")) return;
+
+        const isJa = getPortalLanguage() === "ja";
+        const bar = document.createElement("div");
+        bar.id = "bf6-toolbox-font-control-bar";
+        bar.style.cssText = `
+          display: flex !important;
+          align-items: center !important;
+          justify-content: space-between !important;
+          padding: 5px 10px !important;
+          background: rgb(22, 29, 30) !important;
+          border-bottom: 1px solid #3a4648 !important;
+          color: #fff !important;
+          font-size: 12px !important;
+          user-select: none !important;
+          box-sizing: border-box !important;
+          width: 100% !important;
+          flex-shrink: 0 !important;
+          position: sticky !important;
+          top: 0 !important;
+          z-index: 100 !important;
+        `;
+
+        const label = document.createElement("span");
+        label.style.cssText = "color: #9aa5a7; font-size: 11px;";
+        label.textContent = isJa ? "フォントサイズ" : "Font Size";
+
+        const fGroup = document.createElement("div");
+        fGroup.style.cssText = "display: flex; align-items: center; gap: 6px;";
+
+        const valDisplay = document.createElement("span");
+        valDisplay.id = "bf6-toolbox-font-val";
+        valDisplay.style.cssText = "font-size: 12px; color: #66ccff; min-width: 32px; text-align: center; font-weight: bold;";
+        valDisplay.textContent = getToolboxFontSize() + "px";
+
+        const stepSize = (direction) => {
+            const cur = getToolboxFontSize();
+            let idx = TOOLBOX_FONT_SIZES.indexOf(cur);
+            if (idx === -1) {
+                idx = TOOLBOX_FONT_SIZES.reduce((prev, curr, i) => Math.abs(curr - cur) < Math.abs(TOOLBOX_FONT_SIZES[prev] - cur) ? i : prev, 0);
+            }
+            const nextIdx = Math.max(0, Math.min(TOOLBOX_FONT_SIZES.length - 1, idx + direction));
+            const next = setToolboxFontSize(TOOLBOX_FONT_SIZES[nextIdx]);
+            valDisplay.textContent = next + "px";
+        };
+
+        const createFBtn = (text, dir) => {
+            const b = document.createElement("button");
+            b.textContent = text;
+            b.style.cssText = "background:#2d3839;color:#fff;border:1px solid #556668;border-radius:3px;padding:2px 7px;cursor:pointer;font-size:11px;line-height:1.2;";
+            b.addEventListener("mouseenter", () => b.style.background = "#425355");
+            b.addEventListener("mouseleave", () => b.style.background = "#2d3839");
+            b.addEventListener("click", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                stepSize(dir);
+            });
+            return b;
+        };
+
+        fGroup.appendChild(createFBtn("◀", -1));
+        fGroup.appendChild(valDisplay);
+        fGroup.appendChild(createFBtn("▶", 1));
+
+        bar.appendChild(label);
+        bar.appendChild(fGroup);
+
+        tb.insertBefore(bar, tb.firstChild);
+    }
+
+    function startFontControlMonitor() {
+        applyToolboxFontSize(getToolboxFontSize());
+        initToolboxFontControl();
+        if (!fontControlTimer) {
+            fontControlTimer = setInterval(initToolboxFontControl, 500);
+        }
+    }
+
+    function stopFontControlMonitor() {
+        if (fontControlTimer) {
+            clearInterval(fontControlTimer);
+            fontControlTimer = null;
+        }
+        const bar = document.getElementById("bf6-toolbox-font-control-bar");
+        if (bar) bar.remove();
+        const style = document.getElementById("bf6-toolbox-font-style");
+        if (style) style.remove();
+    }
+
+    // ===== サブルーチン関連処理 =====
     function getSubroutineInstanceName(block) {
         if (!block || block.type !== "subroutineInstanceBlock") return null;
         try {
@@ -102,7 +290,6 @@
         });
     }
 
-    // subroutineInstanceBlock → 同名 subroutineBlock を順番に巡回
     const subroutineTargetCycle = new Map();
 
     function goToSubroutineBlock(block) {
@@ -132,7 +319,6 @@
         return true;
     }
 
-    // subroutineBlock → 同名 subroutineInstanceBlock のうち最も近い1個
     function goToSubroutineSource(block) {
         if (!block || block.type !== "subroutineBlock") return false;
         const name = getSubroutineBlockName(block);
@@ -165,24 +351,8 @@
         return selectAndCenter(target);
     }
 
-    // ルール番号: 現在の名前から既存の「01:」等を除去
     function stripRuleNumber(name) {
         return String(name == null ? "" : name).replace(/^\d{1,3}:?\s*/, "");
-    }
-
-    function getRuleBlockParentMod(block) {
-        if (!block || block.type !== "ruleBlock") return null;
-        try {
-            if (typeof block.getSurroundParent === "function") {
-                let parent = block.getSurroundParent();
-                while (parent) {
-                    if (parent.type === "modBlock") return parent;
-                    parent = typeof parent.getSurroundParent === "function"
-                        ? parent.getSurroundParent() : null;
-                }
-            }
-        } catch (_) { }
-        return null;
     }
 
     function getRuleBlockName(block) {
@@ -248,7 +418,6 @@
     function ruleNumberText() {
         return getPortalLanguage() === "ja" ? "ルール番号付加" : "Add Rule Numbers";
     }
-
 
     // ===== ブロック検索パネル =====
     let blockSearchPanel = null;
@@ -404,7 +573,7 @@
                 for (const child of current.getChildren(false) || []) {
                     if (!child) continue;
                     descendants.push(child);
-                    walk(child);
+                    walk(block);
                 }
             };
             walk(block);
@@ -636,10 +805,8 @@
         const isShift = event.shiftKey;
         const isCtrl = event.ctrlKey || event.metaKey;
 
-        // ShiftまたはCtrlが押されていない通常操作は既定（拡大縮小）のまま通す
         if (!isShift && !isCtrl) return;
 
-        // 検索パネルや入力欄の上ではスクロール処理を行わない
         if (event.target && typeof event.target.closest === "function") {
             if (event.target.closest("#bf6-block-search-panel") || event.target.closest("input, textarea, select")) {
                 return;
@@ -654,24 +821,20 @@
             return;
         }
 
-        // デフォルトのズーム処理やブラウザ動作を停止
         event.preventDefault();
         event.stopPropagation();
 
-        // 移動量の算出
         let delta = event.deltaY;
-        if (event.deltaMode === 1) delta *= 33;      // LINE単位
-        else if (event.deltaMode === 2) delta *= 100; // PAGE単位
+        if (event.deltaMode === 1) delta *= 33;
+        else if (event.deltaMode === 2) delta *= 100;
 
         let deltaX = 0;
         let deltaY = 0;
 
         if (isShift) {
-            // Shift + ホイール: 左右スクロール
             const dx = event.deltaX !== 0 ? event.deltaX : delta;
             deltaX = -dx;
         } else if (isCtrl) {
-            // Ctrl + ホイール: 上下スクロール
             deltaY = -delta;
         }
 
@@ -710,7 +873,7 @@
     let minimapIsCollapsed = false;
     let minimapAnimId = null;
     let minimapDragState = null;
-    let minimapZoom = 1; // 1.0 〜 4.0（ホイールで無段階変更）
+    let minimapZoom = 1;
     let minimapFocusAnchor = null;
     let minimapAutoScrollId = null;
     let minimapEdgeDir = { x: 0, y: 0 };
@@ -772,13 +935,13 @@
 
         if (childWidths.length > 0) {
             const sum = childWidths.reduce((acc, w) => acc + w, 0);
-            baseWidth = sum / childWidths.length; // 子ブロック横幅の平均
+            baseWidth = sum / childWidths.length;
         } else {
             baseWidth = fallbackWidth > 0 ? fallbackWidth : 120;
         }
 
         const singleWidth = Math.max(80, Math.min(1200, Math.round(baseWidth)));
-        return (singleWidth * singleWidth) / 100; // ルールブロック横幅を4倍
+        return (singleWidth * singleWidth) / 100;
     }
 
     function getRuleMapBounds(block) {
@@ -959,7 +1122,6 @@
         const allBlocks = ws.getAllBlocks ? ws.getAllBlocks(false) : [];
         const topBlocks = ws.getTopBlocks ? ws.getTopBlocks(false) : [];
 
-        // 1. MODブロック等の外枠ベース
         ctx.fillStyle = "rgba(42, 54, 68, 0.45)";
         ctx.strokeStyle = "rgba(68, 85, 105, 0.6)";
         ctx.lineWidth = 1;
@@ -975,7 +1137,6 @@
             ctx.strokeRect(bx, by, bw, bh);
         }
 
-        // 2. ルールブロック（赤紫＋境目／個別横幅4倍）
         for (const block of allBlocks) {
             if (block.type !== "ruleBlock") continue;
             const bnd = getRuleMapBounds(block);
@@ -991,7 +1152,6 @@
             ctx.strokeRect(bx + 0.5, by + 0.5, Math.max(1, bw - 1), Math.max(1, bh - 1));
         }
 
-        // 3. サブルーチンブロック（茶色＋枠線／元の表示）
         for (const block of allBlocks) {
             if (block.type !== "subroutineBlock") continue;
             const xy = block.getRelativeToSurfaceXY ? block.getRelativeToSurfaceXY() : { x: 0, y: 0 };
@@ -1008,7 +1168,6 @@
             ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
         }
 
-        // 4. 現在の画面表示枠 (ビューポート)
         const vx = toMapX(curLeft);
         const vy = toMapY(curTop);
         const vw = (viewW / scale) * zoom;
@@ -1021,7 +1180,6 @@
         ctx.strokeRect(vx, vy, vw, vh);
     }
 
-    // マウスホバー位置のブロック名を取得して情報枠へ表示
     function updateHoveredBlockInfo(mx, my) {
         if (!minimapInfoBar) return;
         const ws = _Blockly.getMainWorkspace && _Blockly.getMainWorkspace();
@@ -1123,7 +1281,6 @@
             const targetBlock = findBlockAtWorkspacePos(ws, wsX, wsY);
             if (targetBlock && typeof targetBlock.getRelativeToSurfaceXY === "function") {
                 const xy = targetBlock.getRelativeToSurfaceXY();
-                // ビューポート枠の左上 (curLeft = -scrollX / scale) がブロック左上 (xy.x, xy.y) に重なる位置
                 targetScrollX = -(xy.x * data.scale);
                 targetScrollY = -(xy.y * data.scale);
             } else {
@@ -1286,11 +1443,6 @@
         canvas.height = 360;
         canvas.style.cssText = "background:#12161c;cursor:crosshair;display:block;width:518px;height:360px;";
 
-        let isDragging = false;
-        const handlePointer = (e, snapToBlockTopLeft = false) => {
-            const rect = canvas.getBoundingClientRect();
-            moveWorkspaceToMapPos(e.clientX - rect.left, e.clientY - rect.top, snapToBlockTopLeft);
-        };
         let dragState = null;
         canvas.addEventListener("pointerdown", (e) => {
             if (e.button !== 0) return;
@@ -1454,7 +1606,6 @@
 
     function initScrollWheel() {
         if (wheelListenerAttached) return;
-        // キャプチャフェーズで登録してBlocklyの既定ホイール処理より先に割り込む
         window.addEventListener("wheel", handleWorkspaceWheel, { passive: false, capture: true });
         wheelListenerAttached = true;
     }
@@ -1497,9 +1648,6 @@
         plugin.registerItem(sourceItem);
         _Blockly.ContextMenuRegistry.registry.register(sourceItem);
 
-        // Blocklyは右クリックした対象によって context menu の scope が変わるため、
-        // BLOCK と WORKSPACE の両方に同じ「ブロック検索」を登録する。
-        // BLOCK 側では、右クリックしたブロックのテキストをそのまま検索する。
         const blockSearchItem = {
             id: "blockUtilityBlockSearch",
             displayText: () => blockSearchText(),
@@ -1513,7 +1661,6 @@
         plugin.registerItem(blockSearchItem);
         _Blockly.ContextMenuRegistry.registry.register(blockSearchItem);
 
-        // ブロック以外のワークスペース上でも表示する。
         const workspaceBlockSearchItem = {
             id: "blockUtilityBlockSearchWorkspace",
             displayText: () => blockSearchText(),
@@ -1574,10 +1721,30 @@
         try {
             registerMenus();
             initScrollWheel();
+            startFontControlMonitor();
         } catch (e) {
             if (BF2042Portal.Shared && typeof BF2042Portal.Shared.logError === "function") {
                 BF2042Portal.Shared.logError("BlockUtility initialization", String(e));
             }
+        }
+    };
+
+    plugin.dispose = function () {
+        stopFontControlMonitor();
+        if (minimapPanel) {
+            stopMinimapLoop();
+            minimapPanel.remove();
+            minimapPanel = null;
+            minimapCanvas = null;
+            minimapInfoBar = null;
+            minimapIsOpen = false;
+        }
+        if (blockSearchPanel) {
+            removeBlockSearchHighlight();
+            blockSearchPanel.remove();
+            blockSearchPanel = null;
+            blockSearchInput = null;
+            blockSearchResult = null;
         }
     };
 })();
